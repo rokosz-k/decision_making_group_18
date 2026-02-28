@@ -133,7 +133,7 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
         other = [q for q in rooms if q != r]
         for t in T_slots:
             exchange = gp.quicksum(T_prev(q, t) - T_prev(r, t) for q in other)
-            occ_gain = gp.quicksum(OCC[r2, t] for r2 in rooms)
+            occ_gain = OCC[r, t]
             mdl.addConstr(
                 T_var[r, t] == T_prev(r, t)
                     + zeta_exch * exchange
@@ -282,7 +282,7 @@ print(f"{'='*45}\n")
 # PLOT — representative day (change DAY_TO_PLOT as needed)
 # =============================================================================
 
-DAY_TO_PLOT = 0   # change to any day index 0-99
+DAY_TO_PLOT = 41   # change to any day index 0-99
 
 res = results_per_day[DAY_TO_PLOT]
 if res is not None:

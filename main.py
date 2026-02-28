@@ -16,7 +16,6 @@ from gurobipy import GRB
 from SystemCharacteristics import get_fixed_data
 from PlotsRestaurant import plot_HVAC_results
 
-
 # =============================================================================
 # LOAD FIXED DATA
 # =============================================================================
@@ -128,38 +127,44 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
     # Constraints
     # -------------------------------------------------------------------------
 
-    # Temperature dynamics
+    # Temperature dynamics (t=0 is set by initial condition)
     for r in rooms:
         other = [q for q in rooms if q != r]
         for t in T_slots:
-            exchange = gp.quicksum(T_prev(q, t) - T_prev(r, t) for q in other)
-            occ_gain = OCC[r, t]
-            mdl.addConstr(
-                T_var[r, t] == T_prev(r, t)
-                    + zeta_exch * exchange
-                    - zeta_loss * (T_prev(r, t) - T_out[t])
-                    + zeta_conv * p_prev(r, t)
-                    - zeta_cool * v_prev(t)
-                    + zeta_occ  * occ_gain,
-                name=f"temp_dyn[{r},{t}]"
-            )
+            if t == 0:
+                mdl.addConstr(T_var[r, 0] == T_init, name=f"temp_init[{r}]")
+            else:
+                exchange = gp.quicksum(T_prev(q, t) - T_prev(r, t) for q in other)
+                mdl.addConstr(
+                    T_var[r, t] == T_prev(r, t)
+                        + zeta_exch * exchange
+                        - zeta_loss * (T_prev(r, t) - T_out[t - 1])
+                        + zeta_conv * p_prev(r, t)
+                        - zeta_cool * v_prev(t)
+                        + zeta_occ  * OCC[r, t - 1],
+                    name=f"temp_dyn[{r},{t}]"
+                )
 
     # Humidity dynamics
     for t in T_slots:
-        H_prev  = H_init if t == 0 else H[t - 1]
-        occ_hum = gp.quicksum(OCC[r, t] for r in rooms)
-        mdl.addConstr(
-            H[t] == H_prev
-                + eta_occ  * occ_hum
-                - eta_vent * v_prev(t),
-            name=f"hum_dyn[{t}]"
-        )
+        if t == 0:
+            mdl.addConstr(H[t] == H_init, name=f"hum_init")
+        else:
+            H_prev = H[t - 1]
+            occ_hum_prev = gp.quicksum(OCC[r, t - 1] for r in rooms)
+            mdl.addConstr(
+                H[t] == H_prev
+                    + eta_occ  * occ_hum_prev
+                    - eta_vent * v_prev(t),
+                name=f"hum_dyn[{t}]"
+            )
 
-    # Low-temperature trigger
+    # Low-temperature trigger: alpha[r,t] = 1 when T < T_low
+    # One-sided Big-M: if alpha=0 then T >= T_low
+    # The objective keeps alpha=0 unless temperature actually drops below T_low
     for r in rooms:
         for t in T_slots:
-            mdl.addConstr(T_var[r, t] >= T_low - M * alpha[r, t],       name=f"low_lb[{r},{t}]")
-            mdl.addConstr(T_var[r, t] <= T_low + M * (1 - alpha[r, t]), name=f"low_ub[{r},{t}]")
+            mdl.addConstr(T_var[r, t] >= T_low - M * alpha[r, t], name=f"low_lb[{r},{t}]")
 
     # Recovery mode
     for r in rooms:
@@ -183,11 +188,12 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
         for t in T_slots:
             mdl.addConstr(p[r, t] >= P_max * delta[r, t],              name=f"recov_power[{r},{t}]")
 
-    # High-temperature trigger
+    # High-temperature trigger: beta[r,t] = 1 when T > T_high
+    # One-sided Big-M: if beta=0 then T <= T_high
+    # The objective keeps beta=0 unless temperature actually exceeds T_high
     for r in rooms:
         for t in T_slots:
-            mdl.addConstr(T_var[r, t] <= T_high + M * beta[r, t],       name=f"high_ub[{r},{t}]")
-            mdl.addConstr(T_var[r, t] >= T_high - M * (1 - beta[r, t]), name=f"high_lb[{r},{t}]")
+            mdl.addConstr(T_var[r, t] <= T_high + M * beta[r, t], name=f"high_ub[{r},{t}]")
 
     # Force zero heating when too hot
     for r in rooms:
@@ -211,11 +217,18 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
 
     # Ventilation inertia
     for t in T_slots:
-        end = min(t + T_vent, num_timeslots)
-        mdl.addConstr(
-            gp.quicksum(v[k] for k in range(t, end)) >= min(T_vent, end - t) * y[t],
-            name=f"vent_inertia[{t}]"
-        )
+        if t <= num_timeslots - T_vent:
+            # Standard case: sum from t to t+T_vent-1 >= T_vent * y[t]
+            mdl.addConstr(
+                gp.quicksum(v[k] for k in range(t, t + T_vent)) >= T_vent * y[t],
+                name=f"vent_inertia[{t}]"
+            )
+        else:
+            # End-of-horizon: sum from t to T-1 >= T_vent * y[t]
+            mdl.addConstr(
+                gp.quicksum(v[k] for k in range(t, num_timeslots)) >= T_vent * y[t],
+                name=f"vent_inertia[{t}]"
+            )
 
     # -------------------------------------------------------------------------
     # Solve
@@ -282,7 +295,7 @@ print(f"{'='*45}\n")
 # PLOT — representative day (change DAY_TO_PLOT as needed)
 # =============================================================================
 
-DAY_TO_PLOT = 41   # change to any day index 0-99
+DAY_TO_PLOT = 30   # change to any day index 0-99
 
 res = results_per_day[DAY_TO_PLOT]
 if res is not None:

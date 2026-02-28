@@ -39,8 +39,8 @@ def plot_HVAC_results(HVAC_results):
     ## Temp_r1, Temp_r2, etc are imported from HVAC_results
 
     # Room Temperatures
-    axes[0].plot(T, Temp_r1, label='Room 1 Temp', marker='o')
-    axes[0].plot(T, Temp_r2, label='Room 2 Temp', marker='s')
+    axes[0].plot(T, Temp_r1, label='Room 1 Temp', marker='o', alpha=0.6)
+    axes[0].plot(T, Temp_r2, label='Room 2 Temp', marker='s',alpha=0.6)
     axes[0].axhline(18, color='gray', linestyle='--', alpha=0.5)
     axes[0].axhline(20, color='gray', linestyle='--', alpha=0.5)
     axes[0].set_ylabel("Temperature (°C)")
@@ -59,22 +59,28 @@ def plot_HVAC_results(HVAC_results):
     # Ventilation and Humidity
     axes[2].step(T, v, where='mid', label='Ventilation ON', color='tab:blue')
     axes[2].plot(T, Hum, label='Humidity (%)', color='tab:orange', marker='o')
-    axes[2].axhline(45, color='gray', linestyle='--', alpha=0.5)
-    axes[2].axhline(60, color='gray', linestyle='--', alpha=0.5)
+    #axes[2].axhline(40, color='gray', linestyle='--', alpha=0.5)
+    axes[2].axhline(70, color='gray', linestyle='--', alpha=0.5)
     axes[2].set_ylabel("Ventilation / Humidity")
     axes[2].set_title("Ventilation Status and Humidity")
     axes[2].legend()
     axes[2].grid(True)
     
-    # Electricity price and occupancy
-    axes[3].plot(T, price, label='TOU Price (€/kWh)', color='tab:red', marker='x')
+    # Electricity price and occupancy (price on right axis)
+    ax3_right = axes[3].twinx()   # right axis for price
     axes[3].bar(T, Occ_r1, label='Occupancy Room 1', alpha=0.5)
     axes[3].bar(T, Occ_r2, bottom=Occ_r1, label='Occupancy Room 2', alpha=0.5)
-    axes[3].set_ylabel("Price / Occupancy")
+    ax3_right.plot(T, price, label='TOU Price (€/kWh)', color='tab:red', marker='x')
+    axes[3].set_ylabel("Occupancy")
+    ax3_right.set_ylabel("Price (€/kWh)")
     axes[3].set_xlabel("Time (hours)")
     axes[3].set_title("Electricity Price and Occupancy")
-    axes[3].legend()
     axes[3].grid(True)
+
+    # Combined legend (left + right axis)
+    lines_l, labels_l = axes[3].get_legend_handles_labels()
+    lines_r, labels_r = ax3_right.get_legend_handles_labels()
+    axes[3].legend(lines_l + lines_r, labels_l + labels_r)
     
     plt.tight_layout()
     plt.show()

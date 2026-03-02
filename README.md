@@ -7,6 +7,7 @@ This repository contains the code and data for **Part A of the course assignment
 - **NumPy** – numerical computations
 - **pandas** – data handling
 - **Gurobi (gurobipy)** – optimization modeling and solving
+- **Matplotlib** – data visualization
 
 ## Note
 

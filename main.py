@@ -152,10 +152,15 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
     # Low-temperature trigger: alpha[r,t] = 1 when T < T_low
     # One-sided Big-M: if alpha=0 then T >= T_low
     # The objective keeps alpha=0 unless temperature actually drops below T_low
+        # for r in rooms:
+        #     for t in T_slots:
+        #         mdl.addConstr(T_var[r, t] >= T_low - M * alpha[r, t], name=f"low_lb[{r},{t}]")
+
+    # Low-temperature trigger: alpha[r,t] = 1 iff T < T_low (two-sided Big-M)
     for r in rooms:
         for t in T_slots:
             mdl.addConstr(T_var[r, t] >= T_low - M * alpha[r, t], name=f"low_lb[{r},{t}]")
-
+            mdl.addConstr(T_var[r, t] <= T_low + M * (1 - alpha[r, t]), name=f"low_ub[{r},{t}]")
     # Recovery mode
     for r in rooms:
         for t in T_slots:
@@ -181,10 +186,15 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
     # High-temperature trigger: beta[r,t] = 1 when T > T_high
     # One-sided Big-M: if beta=0 then T <= T_high
     # The objective keeps beta=0 unless temperature actually exceeds T_high
+        # for r in rooms:
+        #     for t in T_slots:
+        #         mdl.addConstr(T_var[r, t] <= T_high + M * beta[r, t], name=f"high_ub[{r},{t}]")
+
+    # High-temperature trigger: beta[r,t] = 1 iff T > T_high (two-sided Big-M)
     for r in rooms:
         for t in T_slots:
-            mdl.addConstr(T_var[r, t] <= T_high + M * beta[r, t], name=f"high_ub[{r},{t}]")
-
+            mdl.addConstr(T_var[r, t] <= T_high + M * beta[r, t],       name=f"high_ub[{r},{t}]")
+            mdl.addConstr(T_var[r, t] >= T_high - M * (1 - beta[r, t]), name=f"high_lb[{r},{t}]")
     # Force zero heating when too hot
     for r in rooms:
         for t in T_slots:
@@ -213,13 +223,18 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
                 gp.quicksum(v[k] for k in range(t, t + T_vent)) >= T_vent * y[t],
                 name=f"vent_inertia[{t}]"
             )
+        # else:
+        #     # End-of-horizon: sum from t to T-1 >= T_vent * y[t]
+        #     mdl.addConstr(
+        #         gp.quicksum(v[k] for k in range(t, num_timeslots)) >= T_vent * y[t],
+        #         name=f"vent_inertia[{t}]"
+            # )
         else:
-            # End-of-horizon: sum from t to T-1 >= T_vent * y[t]
+            remaining = num_timeslots - t  # fewer slots than T_vent remain
             mdl.addConstr(
-                gp.quicksum(v[k] for k in range(t, num_timeslots)) >= T_vent * y[t],
+                gp.quicksum(v[k] for k in range(t, num_timeslots)) >= remaining * y[t],
                 name=f"vent_inertia[{t}]"
             )
-
 
     # Solve
 
@@ -281,7 +296,7 @@ print(f"{'='*45}\n")
 
 # PLOT — representative day (change DAY_TO_PLOT as needed)
 
-DAY_TO_PLOT = 30   # change to any day index 0-99 (value 0 corresponds to the first day in the dataset)
+DAY_TO_PLOT = 0   # change to any day index 0-99 (value 0 corresponds to the first day in the dataset)
 
 res = results_per_day[DAY_TO_PLOT]
 if res is not None:

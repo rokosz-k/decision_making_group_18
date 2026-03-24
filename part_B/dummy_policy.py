@@ -4,7 +4,7 @@ everything up to the overrule controllers.
 """
 
 
-def select_action(state):
+def dummy_action(state):
 
     HereAndNowActions = {
         "HeatPowerRoom1": 0,   # No heating in room 1

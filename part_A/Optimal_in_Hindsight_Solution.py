@@ -281,6 +281,21 @@ if res is not None:
         'price': res['price'],
     }
     print(f"Plotting results for day {DAY_TO_PLOT}...")
-    plot_HVAC_results(HVAC_results)
+    # plot_HVAC_results(HVAC_results)
 
     
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+# Plotting a basic histogram
+# plt.hist(solved_costs, bins=15, color='skyblue', edgecolor='black')
+sns.histplot(solved_costs, bins=10, kde=True, color='skyblue', edgecolor='black')
+
+# Adding labels and title
+plt.xlabel('Values')
+plt.ylabel('Frequency')
+plt.title('Basic Histogram')
+
+# Display the plot
+plt.show()

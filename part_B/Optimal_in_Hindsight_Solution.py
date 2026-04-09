@@ -8,15 +8,23 @@ Each day is fully independent
 The plot shows results for a representative day (defined later in the code).
 """
 
+import sys
+import os
 import numpy as np
 import pandas as pd
 import gurobipy as gp
 from gurobipy import GRB
-from SystemCharacteristics import get_fixed_data
-from PlotsRestaurant import plot_HVAC_results
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from part_A.SystemCharacteristics import get_fixed_data
+from part_A.PlotsRestaurant import plot_HVAC_results
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
+occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
 # Load data from the file
-
 data = get_fixed_data()
 
 # Sets
@@ -24,11 +32,12 @@ num_timeslots = data['num_timeslots']
 T_slots = list(range(num_timeslots))
 rooms = [0, 1]
 
-# Parameters 
-price_df = pd.read_csv('PriceData.csv', header=0) # Electricity price
 
-occ1_df = pd.read_csv('OccupancyRoom1.csv', header=0) # Occupancy in room 1 
-occ2_df = pd.read_csv('OccupancyRoom2.csv', header=0) # )ccupancy in room 2
+# Parameters 
+price_df = pd.read_csv(price_path, header=0) # Electricity price
+
+occ1_df = pd.read_csv(occ1_path, header=0) # Occupancy in room 1 
+occ2_df = pd.read_csv(occ2_path, header=0) # )ccupancy in room 2
 
 L = num_timeslots # Number of timeslots in the Lookahead Horizon
 

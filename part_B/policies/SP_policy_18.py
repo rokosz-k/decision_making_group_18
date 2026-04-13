@@ -9,8 +9,8 @@ from pyomo.environ import (
     Objective, Constraint, minimize, value
 )
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'data'))
-from v2_SystemCharacteristics import get_fixed_data
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from data.v2_SystemCharacteristics import get_fixed_data
 
 # The state will be provided by the environment as the following dictionary
 

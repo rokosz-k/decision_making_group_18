@@ -488,7 +488,7 @@ def build_scenario_tree(state, L, K, S, PRICE_FILE, OCC1_FILE, OCC2_FILE):
                 next_level.append(child)
 
         current_level = next_level
-        print(f"Stage t={t}: {len(next_level)} nodes")
+        #print(f"Stage t={t}: {len(next_level)} nodes")
 
     # First product
     leaves = current_level # Leaves are the nodes in the final stage
@@ -550,8 +550,9 @@ def solve_model(m):
     solver = pyo.SolverFactory("gurobi")
     solver.options["MIPGap"]   = 1e-4
     solver.options["TimeLimit"] = 300     # seconds
+    solver.options["OutputFlag"] = False
 
-    results = solver.solve(m, tee=True)
+    results = solver.solve(m, tee=False)
 
     if results.solver.termination_condition == pyo.TerminationCondition.optimal:
         print(f"\nOptimal cost: {value(m.obj):.4f}")
@@ -577,12 +578,12 @@ def select_action(state):
     # 2. Specify the structure of the scenario tree
     L = min(L, K - state["current_time"] + 1)   # Update lookahead horizon length for the current timeslot
     L_set = list(range(state["current_time"], state["current_time"] + L - 1 + 1))  # Lookahead Horizon (e.g. {1, 2, 3, 4})
-    print("L =", L_set)
-    print(f"Lookahead time horizon length is {L}.")
+    # print("L =", L_set)
+    # print(f"Lookahead time horizon length is {L}.")
     
     OMEGA = pow(B,L-1)  # Number of scenarios generated
     OMEGA_set = list(range(1, OMEGA+1)) # Set of scenarios
-    print("There are", OMEGA, "scenarios generated in total.")
+    # print("There are", OMEGA, "scenarios generated in total.")
 
     # 3. Create scenarios and probabilities
     root, leaves, probabilities, (price, occ) = build_scenario_tree(state, L, B, S, PRICE_FILE, OCC1_FILE, OCC2_FILE)
@@ -640,7 +641,7 @@ def select_action(state):
         print(f"  {', '.join(vals)}")
 
     #print_example_solution(m)  # Compact results
-    print(results)              # Full results
+    # print(results)              # Full results
     #results.to_csv("results.csv") # Save a file
 
     HereAndNowActions = {
@@ -666,5 +667,3 @@ state = {
     "low_override_r2": 0, #Is the low-temperature overrule controller of room 2 active 
     "current_time": 1 #What is the hour of the day
 }
-
-select_action(state)

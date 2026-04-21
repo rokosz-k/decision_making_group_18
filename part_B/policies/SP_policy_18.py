@@ -555,9 +555,9 @@ def solve_model(m):
     results = solver.solve(m, tee=False)
 
     if results.solver.termination_condition == pyo.TerminationCondition.optimal:
-        print(f"\nOptimal cost: {value(m.obj):.4f}")
+        print(f"Optimal cost: {value(m.obj):.4f}")
     else:
-        print(f"\nSolver status: {results.solver.termination_condition}")
+        print(f"Solver status: {results.solver.termination_condition}")
 
     return m, results
 
@@ -590,7 +590,7 @@ def select_action(state):
 
     # sanity check
     total_prob = sum(probabilities.values())
-    print(f"\nSum of all p_omega: {total_prob:.6f}  (should be ≈ 1.0)")
+    # print(f"\nSum of all p_omega: {total_prob:.6f}  (should be ≈ 1.0)")
 
     # 4. Create non-anticipativity sets (OMEGA_tw set)
     OMEGA_tw = build_OMEGA_tw(state, leaves, OMEGA, OMEGA_set, L_set)

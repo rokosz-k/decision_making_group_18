@@ -61,6 +61,29 @@ def step_env(state, action, data, occupancy):
     Occ1 = occupancy["Room1"][t]
     Occ2 = occupancy["Room2"][t]
 
+    # check if overrules are active and adjust actions accordingly
+    # -----------------------------
+    # Enforce max heating during low override
+    # -----------------------------
+    if low_r1 == 1:
+        P1 = data['heating_max_power']
+    if low_r2 == 1:
+        P2 = data['heating_max_power']
+
+    # -----------------------------
+    # High temperature cutoff
+    # -----------------------------
+    T_high = data['temp_max_comfort_threshold']
+    if T1 > T_high:
+        P1 = 0
+    if T2 > T_high:
+        P2 = 0
+    # After calculating H_new, but before cost calculation:
+    if H > data['humidity_threshold']:
+        vent_on = 1
+
+
+
     # -----------------------------
     # Temperature dynamics
     # -----------------------------
@@ -87,6 +110,8 @@ def step_env(state, action, data, occupancy):
     # -----------------------------
     H_new = H + data['humidity_occupancy_coeff'] * (Occ1 + Occ2) - data['humidity_vent_coeff'] * vent_on
 
+
+
     # -----------------------------
     # Low-temperature overrule controller
     # -----------------------------
@@ -105,22 +130,7 @@ def step_env(state, action, data, occupancy):
     elif low_r2 == 1 and T2_new >= T_ok:
         low_r2 = 0
 
-    # -----------------------------
-    # Enforce max heating during low override
-    # -----------------------------
-    if low_r1 == 1:
-        P1 = data['heating_max_power']
-    if low_r2 == 1:
-        P2 = data['heating_max_power']
 
-    # -----------------------------
-    # High temperature cutoff
-    # -----------------------------
-    T_high = data['temp_max_comfort_threshold']
-    if T1_new > T_high:
-        P1 = 0
-    if T2_new > T_high:
-        P2 = 0
 
     # -----------------------------
     # Ventilation inertia
@@ -158,3 +168,4 @@ def step_env(state, action, data, occupancy):
     done = t + 1 >= data['num_timeslots']
 
     return new_state, cost, done
+

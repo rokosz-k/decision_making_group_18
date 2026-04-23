@@ -11,6 +11,8 @@ from pyomo.environ import (
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from data.v2_SystemCharacteristics import get_fixed_data
+from part_B.PriceProcessRestaurant import price_model
+from part_B.OccupancyProcessRestaurant import next_occupancy_levels
 
 # The state will be provided by the environment as the following dictionary
 
@@ -29,7 +31,7 @@ from data.v2_SystemCharacteristics import get_fixed_data
 # }
 
 class Node:
-    """This is part of scpecifying the tree structure (Step 2) but used in Step 3+"""
+    """Class for node in the scenario tree. (Step 3)"""
     def __init__(self, value, cond_prob, parent, stage):
         self.value = value
         self.cond_prob = cond_prob
@@ -38,7 +40,7 @@ class Node:
         self.children = []
 
     def path_from_root(self):
-        """Return list of nodes from root down to this node."""
+        """Return list of nodes from root down to this (self) node."""
         path = []
         node = self
         while node is not None:
@@ -48,11 +50,11 @@ class Node:
     
     def scenario_probability(self):
         """
-        p_omega = product of conditional probabilities along the root-to-leaf path.
-        The root node has cond_prob=1 (probability 1 at initialization).
+        Return p_omega.
+        p_omega = product of conditional probabilities along the root-to-leaf path (scenario).
         """
         path = self.path_from_root()
-        p_omega = 1.0
+        p_omega = 1.0 # The root node has cond_prob=1 (probability 1 at initialization).
         for node in path:
             p_omega *= node.cond_prob
         return p_omega
@@ -60,16 +62,8 @@ class Node:
 def build_model(data: dict, state: dict) -> ConcreteModel:
     """
     Build the multi-stage stochastic MILP.
-
-    Expected keys in `state`:
-        current_time         : int, first time slot of the horizon
-        T_init      : dict[(r, tau)] -> float, initial room temperatures
-        H_init      : float, initial humidity at tau
-        u_init      : dict[r] -> int {0,1}, overrule controller state before horizon
-        c0          : int, consecutive hours ventilation was already on
-        v_prev      : int {0,1}, ventilation state before horizon (= 1 if c0 > 0)
-    Expected keys in `data`:
-        L           : list[int], set of time slots in the horizon [tau, tau+1, ..., tau+K-1]
+    Expected keys in 'data':
+        L           : list[int], set of time slots in the horizon [tau, tau+1, ..., tau+|L|-1]
         R           : list[int], set of room indices, e.g. [1, 2]
         Omega       : list[int], set of scenario indices
         Omega_tw    : dict[(t, omega)] -> list[omega], indistinguishable scenarios
@@ -83,7 +77,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # Sets
     # ------------------------------------------------------------------
     tau = state["current_time"]
-    L   = data["L"]          # list of time slots
+    L   = data["L"]
     R   = data["R"]
     Om  = data["Omega"]
 
@@ -100,7 +94,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.pi       = Param(m.Omega, initialize=data["pi"])
     m.price    = Param(m.Omega, m.L, initialize=data["price"])
     m.occ      = Param(m.Omega, m.R, m.L, initialize=data["occ"])
-    m.T_out    = Param(m.L, initialize=sys_characteristics["outdoor_temperature"][tau - 1])
+    m.T_out    = Param(m.L, initialize={t: sys_characteristics["outdoor_temperature"][t - 1] for t in L})
     m.P_bar    = Param(m.R, initialize=sys_characteristics["heating_max_power"])
     m.P_vent   = Param(initialize=sys_characteristics["ventilation_power"])
 
@@ -109,7 +103,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.T_high   = Param(initialize=sys_characteristics["temp_max_comfort_threshold"])
     m.H_high   = Param(initialize=sys_characteristics["humidity_threshold"])
     m.U_vent   = Param(initialize=sys_characteristics["vent_min_up_time"], within=pyo.NonNegativeIntegers)
-    m.M_temp   = Param(initialize=1e6)
+    m.M_temp   = Param(initialize=1e6) # We can lower big-Ms
     m.M_hum    = Param(initialize=1e6)
 
     m.zeta_exch = Param(initialize=sys_characteristics["heat_exchange_coeff"])
@@ -362,18 +356,6 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     Omega_tw = data["Omega_tw"]   # dict[(t, omega)] -> list of indistinguishable scenarios
 
-    def nac_p_rule(m, om, r, t):
-        return [
-            m.p[om, r, t] == m.p[om2, r, t]
-            for om2 in Omega_tw[(t, om)] if om2 != om
-        ]
-
-    def nac_v_rule(m, om, t):
-        return [
-            m.v[om, t] == m.v[om2, t]
-            for om2 in Omega_tw[(t, om)] if om2 != om
-        ]
-
     # Build NAC constraints explicitly to avoid duplicate pairs
     nac_p_constraints = {}
     nac_v_constraints = {}
@@ -400,54 +382,41 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
 
     return m
 
-def sample(S, t, PRICE_FILE, OCC1_FILE, OCC2_FILE):
+def sample(price_t, price_previous, r1_current, r2_current, S):
     """
-    Monte Carlo Sampling of State Variable Combinations
-    ---
-    State variables: electricity price, occupancy room 1, occupancy room 2
-    S: Number of Monte Carlo scenarios
-    t: Timeslot of interest (1-10, corresponds to hour column)
-    Data: 100 days x 10 hourly timeslots
-    Output: S scenario combinations for a given timeslot t
+    Uncertain price and occupancy sampling using PriceProcessRestaurant.py and OccupancyProcessRestaurant.py.
+    Attributes:
+        price_t (float): Price at t.
+        price_previous (float): Previous price (at t-1).
+        r1_current (float): Current occupancy in room 1.
+        r2_current (float): Current occupancy in room 2.
+        S (int): Sampling factor (number of samples generated).
+    Returns:
+        numpy.ndarray: (S, 3) stack, where each row is one [price, occ1, occ2] sample.
     """
-    SEED = 42     # for reproducibility
+    num_paths = S # Number of samples
+    sampled_price = []
+    sampled_occ1 = []
+    sampled_occ2 = []
 
-    # --- Load data ---
-    # Price file: first column is "previous price", columns 1–10 are hourly timeslots
-    price_df = pd.read_csv(PRICE_FILE, header=0)
-    price_df.columns = ["t0"] + [f"t{i}" for i in range(1, 11)]   # t0 = prev price
+    for i in range(num_paths):
+        sampled_price.append(price_model(price_t, price_previous))
+        sampled_occ1.append(next_occupancy_levels(r1_current, r2_current)[0])
+        sampled_occ2.append(next_occupancy_levels(r1_current, r2_current)[1])
 
-    # Occupancy files: 10 columns corresponding to timeslots 1–10 (0-indexed as 0–9)
-    occ1_df = pd.read_csv(OCC1_FILE, header=0)
-    occ2_df = pd.read_csv(OCC2_FILE, header=0)
-    occ1_df.columns = [f"t{i}" for i in range(1, 11)]
-    occ2_df.columns = [f"t{i}" for i in range(1, 11)]
-
-    # ── Extract the empirical distribution for timeslot t ────────────────────────
-    # Each column holds 100 observed values (one per day) → empirical population
-    price_at_t = price_df[f"t{t}"].values   # shape (100,)
-    occ1_at_t  = occ1_df[f"t{t}"].values   # shape (100,)
-    occ2_at_t  = occ2_df[f"t{t}"].values   # shape (100,)
-
-    # ── Monte Carlo sampling (independent, with replacement) ─────────────────────
-    rng = np.random.default_rng(SEED)
-
-    sampled_price = rng.choice(price_at_t, size=S, replace=True)
-    sampled_occ1  = rng.choice(occ1_at_t,  size=S, replace=True)
-    sampled_occ2  = rng.choice(occ2_at_t,  size=S, replace=True)
-
-    # ── Assemble results ──────────────────────────────────────────────────────────
-    # Stack into (S, 3) — each row is one [price, occ1, occ2] scenario
+    # Assemble (S, 3) stack - each row is one [price, occ1, occ2] sample
     return np.column_stack([sampled_price, sampled_occ1, sampled_occ2])
 
-def build_scenario_tree(state, L, K, S, PRICE_FILE, OCC1_FILE, OCC2_FILE):
+def build_scenario_tree(state, L, K, S):
     """
-    state : ...
-    L     : number of stages to branch forward
-    S     : number of samples
-    K     : number of clusters (branches per node)
+    Attributes:
+        state (dict): State dictionary provided by the environment.
+        L (int): Lookahead horizon length. Number of stages to branch forward.
+        K (int): Branching factor. Number of clusters (branches per node).
+        S (int): Sampling factor. Number of samples generated per node (before clustering).
     
-    Returns ...
+    Returns:
+        tuple: root, leaves, probabilities, (price, occ)
     """
     # --- Initialize: root node at stage tau with probability 1 ---
     root = Node(value=[state["price_t"],state["Occ1"],state["Occ2"]], cond_prob=1.0, parent=None, stage=state["current_time"])
@@ -461,7 +430,14 @@ def build_scenario_tree(state, L, K, S, PRICE_FILE, OCC1_FILE, OCC2_FILE):
         for node in current_level:
 
             # Generate S samples from this node
-            samples = sample(S, t, PRICE_FILE, OCC1_FILE, OCC2_FILE)
+            price_t = node.value[0]
+            if node.stage == state["current_time"]:     # If branching out from the root node, take previous price from state dict
+                price_previous = state["price_previous"]
+            else:
+                price_previous = node.parent.value[0]   # Takes price from the parent node
+            r1_current = node.value[1]
+            r2_current = node.value[2]
+            samples = sample(price_t, price_previous, r1_current, r2_current, S)
             sample_probs = np.full(S, 1.0 / S) # Each sample gets probability 1/S
 
             # --- Clustering (stage-wise): cluster into K clusters ---
@@ -517,7 +493,17 @@ def build_scenario_tree(state, L, K, S, PRICE_FILE, OCC1_FILE, OCC2_FILE):
     return root, leaves, probabilities, (price, occ)
 
 def build_OMEGA_tw(state, leaves, OMEGA, OMEGA_set, L_set):
-    """"""
+    """Non-anticipativity sets.
+    Attributes:
+        state (dict): State dictionary provided by the environment.
+        leaves (list): List of leaf nodes (final stage nodes in the scenario tree).
+        OMEGA: Number of scenarios (= |OMEGA_set|).
+        OMEGA_set (list): Set of scenarios.
+        L_set (list): Set of lookahead stages (lookahead horizon).
+
+    Returns:
+        OMEGA_tw (dict): dict[(t, omega)] -> list. Sets of scenarios that are indistinguishable from scenario omega at stage t. 
+    """
     OMEGA_tw = {}
 
     def get_leaf_indices(node, scenarios_nodes):
@@ -535,7 +521,7 @@ def build_OMEGA_tw(state, leaves, OMEGA, OMEGA_set, L_set):
 
     for t in L_set[1:]: # Rest of the stages
         for s in OMEGA_set:
-            node = leaves[s-1]   # Initialize the leaf node of scenario s
+            node = leaves[s-1]      # Initialize the leaf node of scenario s
             while node.stage != t:  # Walk back up to stage t 
                 node = node.parent
             end_scenarios = get_leaf_indices(node,leaves)
@@ -549,7 +535,7 @@ def solve_model(m):
     """Build and solve the model using Gurobi."""
     solver = pyo.SolverFactory("gurobi")
     solver.options["MIPGap"]   = 1e-4
-    solver.options["TimeLimit"] = 300     # seconds
+    #solver.options["TimeLimit"] = 300     # seconds (=5 mins)
     solver.options["OutputFlag"] = False
 
     results = solver.solve(m, tee=False)
@@ -562,18 +548,14 @@ def solve_model(m):
     return m, results
 
 def select_action(state):
-    # Files used for sampling
-    ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')) # 2 folders up
-    PRICE_FILE = os.path.join(ROOT_DIR, 'data', 'v2_PriceData.csv')
-    OCC1_FILE = os.path.join(ROOT_DIR, "data", "OccupancyRoom1.csv")
-    OCC2_FILE = os.path.join(ROOT_DIR, "data", "OccupancyRoom2.csv")
-    K = 10 # Simulation time horizon
+    params = get_fixed_data()
+    K = int(params['num_timeslots']) # Simulation time horizon from SystemCharacteristics
     R = [1,2] # Set of rooms
 
     # 1. Specify the Lookahead Horizon Length
-    L = 3   # Lookahead horizon length
+    L = 4   # Lookahead horizon length
     B = 3   # Branching factor
-    S = 10  # Number of samples
+    S = 100  # Sampling factor
 
     # 2. Specify the structure of the scenario tree
     L = min(L, K - state["current_time"] + 1)   # Update lookahead horizon length for the current timeslot
@@ -586,11 +568,11 @@ def select_action(state):
     # print("There are", OMEGA, "scenarios generated in total.")
 
     # 3. Create scenarios and probabilities
-    root, leaves, probabilities, (price, occ) = build_scenario_tree(state, L, B, S, PRICE_FILE, OCC1_FILE, OCC2_FILE)
+    root, leaves, probabilities, (price, occ) = build_scenario_tree(state, L, B, S)
 
-    # sanity check
+    # Sanity check
     total_prob = sum(probabilities.values())
-    # print(f"\nSum of all p_omega: {total_prob:.6f}  (should be ≈ 1.0)")
+    #print(f"\nSum of all p_omega: {total_prob:.6f}  (should be ≈ 1.0)")
 
     # 4. Create non-anticipativity sets (OMEGA_tw set)
     OMEGA_tw = build_OMEGA_tw(state, leaves, OMEGA, OMEGA_set, L_set)
@@ -640,9 +622,9 @@ def select_action(state):
         vals = [f"t={t}: {int(value(m.v[1, t]))}" for t in m.L]
         print(f"  {', '.join(vals)}")
 
-    #print_example_solution(m)  # Compact results
-    # print(results)              # Full results
-    #results.to_csv("results.csv") # Save a file
+    #print_example_solution(m)      # Compact results
+    #print(results)                 # Full results
+    #results.to_csv("results.csv")  # Save a file
 
     HereAndNowActions = {
     "HeatPowerRoom1" : value(m.p[1, 1, state["current_time"]]),

@@ -46,16 +46,6 @@ eta_vent = data['humidity_vent_coeff']
 
 M = 1e4
 
-# Load time series data for occupancy and electricity prices
-
-occ1_df = pd.read_csv('OccupancyRoom1.csv', header=0)
-occ2_df = pd.read_csv('OccupancyRoom2.csv', header=0)
-price_df = pd.read_csv('PriceData.csv',      header=0)
-
-num_days = len(occ1_df)   # 100
-print(f"Loaded {num_days} days of data.\n")
-
-
 # SINGLE-DAY MILP
 
 def solve_day(day_idx, occ1, occ2, price, verbose=False):
@@ -258,59 +248,64 @@ def solve_day(day_idx, occ1, occ2, price, verbose=False):
         return None
 
 
-# SOLVE ALL 100 DAYS
+if __name__ == '__main__':
+    # Load time series data for occupancy and electricity prices
+    occ1_df  = pd.read_csv('data/OccupancyRoom1.csv', header=0)
+    occ2_df  = pd.read_csv('data/OccupancyRoom2.csv', header=0)
+    price_df = pd.read_csv('data/PriceData.csv',      header=0)
 
-daily_costs = []
-results_per_day = []
+    num_days = len(occ1_df)   # 100
+    print(f"Loaded {num_days} days of data.\n")
 
-for day in range(num_days):
-    occ1 = [float(occ1_df.iloc[day, t]) for t in T_slots]
-    occ2 = [float(occ2_df.iloc[day, t]) for t in T_slots]
-    price = [float(price_df.iloc[day, t]) for t in T_slots]
+    # SOLVE ALL 100 DAYS
 
-    print(f"Solving day {day + 1:3d} / {num_days} ...", end=" ")
-    res = solve_day(day, occ1, occ2, price, verbose=False)
+    daily_costs = []
+    results_per_day = []
 
+    for day in range(num_days):
+        occ1  = [float(occ1_df.iloc[day, t])  for t in T_slots]
+        occ2  = [float(occ2_df.iloc[day, t])  for t in T_slots]
+        price = [float(price_df.iloc[day, t]) for t in T_slots]
+
+        print(f"Solving day {day + 1:3d} / {num_days} ...", end=" ")
+        res = solve_day(day, occ1, occ2, price, verbose=False)
+
+        if res is not None:
+            daily_costs.append(res['cost'])
+            results_per_day.append(res)
+            print(f"cost = {res['cost']:.4f} €")
+        else:
+            results_per_day.append(None)
+            print("FAILED")
+
+    # SUMMARY
+
+    solved_costs = [c for c in daily_costs]
+    print(f"\n{'='*45}")
+    print(f"  Days solved:          {len(solved_costs)} / {num_days}")
+    print(f"  Average daily cost:   {np.mean(solved_costs):.4f} €")
+    print(f"  Std deviation:        {np.std(solved_costs):.4f} €")
+    print(f"  Min daily cost:       {np.min(solved_costs):.4f} €")
+    print(f"  Max daily cost:       {np.max(solved_costs):.4f} €")
+    print(f"{'='*45}\n")
+
+    # PLOT — representative day (change DAY_TO_PLOT as needed)
+
+    DAY_TO_PLOT = 0   # change to any day index 0-99
+
+    res = results_per_day[DAY_TO_PLOT]
     if res is not None:
-        daily_costs.append(res['cost'])
-        results_per_day.append(res)
-        print(f"cost = {res['cost']:.4f} €")
-    else:
-        results_per_day.append(None)
-        print("FAILED")
-
-
-
-# SUMMARY
-
-solved_costs = [c for c in daily_costs]
-print(f"\n{'='*45}")
-print(f"  Days solved:          {len(solved_costs)} / {num_days}")
-print(f"  Average daily cost:   {np.mean(solved_costs):.4f} €")
-print(f"  Std deviation:        {np.std(solved_costs):.4f} €")
-print(f"  Min daily cost:       {np.min(solved_costs):.4f} €")
-print(f"  Max daily cost:       {np.max(solved_costs):.4f} €")
-print(f"{'='*45}\n")
-
-
-
-# PLOT — representative day (change DAY_TO_PLOT as needed)
-
-DAY_TO_PLOT = 0   # change to any day index 0-99 (value 0 corresponds to the first day in the dataset)
-
-res = results_per_day[DAY_TO_PLOT]
-if res is not None:
-    HVAC_results = {
-        'T': T_slots,
-        'Temp_r1': res['Temp_r1'],
-        'Temp_r2': res['Temp_r2'],
-        'h_r1': res['h_r1'],
-        'h_r2': res['h_r2'],
-        'v': res['v'],
-        'Hum': res['Hum'],
-        'Occ_r1': res['Occ_r1'],
-        'Occ_r2': res['Occ_r2'],
-        'price': res['price'],
-    }
-    print(f"Plotting results for day {DAY_TO_PLOT}...")
-    plot_HVAC_results(HVAC_results)
+        HVAC_results = {
+            'T': T_slots,
+            'Temp_r1': res['Temp_r1'],
+            'Temp_r2': res['Temp_r2'],
+            'h_r1': res['h_r1'],
+            'h_r2': res['h_r2'],
+            'v': res['v'],
+            'Hum': res['Hum'],
+            'Occ_r1': res['Occ_r1'],
+            'Occ_r2': res['Occ_r2'],
+            'price': res['price'],
+        }
+        print(f"Plotting results for day {DAY_TO_PLOT}...")
+        plot_HVAC_results(HVAC_results)

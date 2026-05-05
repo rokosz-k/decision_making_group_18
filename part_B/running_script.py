@@ -8,7 +8,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
 from part_A.SystemCharacteristics import get_fixed_data
-from part_B.policies.SP_policy_18 import select_action
+# from part_B.policies.SP_policy_18 import select_action
+from part_B.policies.ADP_policy_18 import select_action
 from part_B.RestaurantEnv import step_env, reset_env
 from part_B.dummy_policy import dummy_action, DUMMY_ACTION
 
@@ -81,7 +82,7 @@ for day in range(num_days):
     total_cost = 0.0
 
     while not done:
-        action            = get_action(select_action, state)
+        action            =  get_action(select_action, state)
         state, cost, done = step_env(state, action, data, occupancy)
         total_cost       += cost
 

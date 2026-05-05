@@ -62,6 +62,47 @@ def step_env(state, action, data, occupancy):
     Occ2 = occupancy["Room2"][t]
 
     # -----------------------------
+    # Action overrides — resolve before dynamics
+    # -----------------------------
+
+    # Low-override: force heater to max while room is cold
+    if low_r1 == 1:
+        P1 = data['heating_max_power']
+    if low_r2 == 1:
+        P2 = data['heating_max_power']
+
+    # High-temperature cutoff: kill heater if room is already too hot
+    T_high = data['temp_max_comfort_threshold']
+    if T1 > T_high:
+        P1 = 0
+    if T2 > T_high:
+        P2 = 0
+
+    # Humidity-triggered ventilation: force ON when humidity exceeds threshold
+    if H > data['humidity_threshold']:
+        vent_on = 1
+
+    if vent_on == 1:
+        vent_counter += 1
+
+    if vent_on == 0:
+        # if vent_counter == 0:
+        #     vent_on = 0
+        if 0 < vent_counter <= data['vent_min_up_time']:
+            vent_on = 1
+            vent_counter += 1
+        # if vent_counter > 3:
+        #     vent_on = 0
+
+
+    # # Ventilation inertia: if counter is running, ventilation must stay ON
+    # if vent_on == 1 and vent_counter == 0:
+    #     vent_counter = data['vent_min_up_time']
+    # if vent_counter > 0:
+    #     vent_on = 1
+    #     vent_counter -= 1
+
+    # -----------------------------
     # Temperature dynamics
     # -----------------------------
     T1_new = (
@@ -88,7 +129,7 @@ def step_env(state, action, data, occupancy):
     H_new = H + data['humidity_occupancy_coeff'] * (Occ1 + Occ2) - data['humidity_vent_coeff'] * vent_on
 
     # -----------------------------
-    # Low-temperature overrule controller
+    # Low-temperature overrule controller — update flags for next step
     # -----------------------------
     T_low = data['temp_min_comfort_threshold']
     T_ok  = data['temp_OK_threshold']
@@ -104,32 +145,6 @@ def step_env(state, action, data, occupancy):
         low_r2 = 1
     elif low_r2 == 1 and T2_new >= T_ok:
         low_r2 = 0
-
-    # -----------------------------
-    # Enforce max heating during low override
-    # -----------------------------
-    if low_r1 == 1:
-        P1 = data['heating_max_power']
-    if low_r2 == 1:
-        P2 = data['heating_max_power']
-
-    # -----------------------------
-    # High temperature cutoff
-    # -----------------------------
-    T_high = data['temp_max_comfort_threshold']
-    if T1_new > T_high:
-        P1 = 0
-    if T2_new > T_high:
-        P2 = 0
-
-    # -----------------------------
-    # Ventilation inertia
-    # -----------------------------
-    if vent_on == 1 and vent_counter == 0:
-        vent_counter = data['vent_min_up_time']
-    if vent_counter > 0:
-        vent_on = 1
-        vent_counter -= 1
 
     # -----------------------------
     # Cost function

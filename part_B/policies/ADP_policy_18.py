@@ -1,200 +1,367 @@
 """
-ADP Policy — Group 18
-Task 4: Approximate Dynamic Programming with Linear Value Function Approximation.
+ADP_policy_18.py
 
-One-step lookahead using learned value function V̂_{t+1}(s').
+Approximate Dynamic Programming policy with linear value function approximation.
 
-At each hour t:
-  1. Enumerate feasible actions
-  2. For each action: call step_env with known current values (deterministic)
-  3. Sample next-period uncertainty using the official process models
-     (PriceProcessRestaurant, OccupancyProcessRestaurant) conditioned on
-     current state — matches the distribution used for grader evaluation
-  4. Return action minimising immediate cost + expected future value
+At each hour t, selects action by solving a one-step lookahead MILP:
+
+    min  price_mean * (p1_eff + p2_eff + P_vent * v)
+       + eta_{t+1} @ features(next_state)
+
+    s.t. temperature/humidity dynamics (linear in p1, p2, v)
+         overrule controller logic (modelled with big-M binary constraints)
+         ventilation inertia (hard constraint on v)
+
+Exogenous uncertainty (next price, next occupancy) is handled by sampling
+K scenarios from the process models BEFORE the MILP and using their means.
+
+Trained weights (eta.pkl) are loaded from the repo root at import time.
 """
 
 import os
 import sys
-import copy
-
+import pickle
 import numpy as np
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-_POLICY_DIR  = os.path.dirname(os.path.abspath(__file__))
-_PART_B_DIR  = os.path.dirname(_POLICY_DIR)
-_PROJECT_DIR = os.path.dirname(_PART_B_DIR)
-_ADP_DIR     = os.path.join(_PART_B_DIR, 'adp')
-_WEIGHTS_DIR = os.path.join(_ADP_DIR, 'weights')
-_PART_A_DIR  = os.path.join(_PROJECT_DIR, 'part_A')
-
-sys.path.insert(0, _PROJECT_DIR)
-sys.path.insert(0, _PART_A_DIR)
-sys.path.insert(0, _ADP_DIR)
-sys.path.insert(0, _PART_B_DIR)
-
-from value_function import (
-    compute_features, normalize_features, estimate_value,
-    NUM_FEATURES, T_END
-)
-from SystemCharacteristics import get_fixed_data
-from part_B.RestaurantEnv import step_env
-from PriceProcessRestaurant import price_model
-from OccupancyProcessRestaurant import next_occupancy_levels
-
-# ── Load weights (once at import) ─────────────────────────────────────────────
-_thetas = np.load(os.path.join(_WEIGHTS_DIR, 'thetas.npy'))
-_mu     = np.load(os.path.join(_WEIGHTS_DIR, 'mu.npy'))
-_sigma  = np.load(os.path.join(_WEIGHTS_DIR, 'sigma.npy'))
-
-assert _thetas.shape == (T_END, NUM_FEATURES), (
-    f"thetas shape mismatch: expected ({T_END},{NUM_FEATURES}), got {_thetas.shape}"
+from pyomo.environ import (
+    ConcreteModel, Var, Objective, Constraint,
+    NonNegativeReals, Binary, value, SolverFactory, minimize
 )
 
-# ── System parameters ─────────────────────────────────────────────────────────
-_base_data = get_fixed_data()
-_P_MAX     = _base_data['heating_max_power']
-_P_VENT    = _base_data['ventilation_power']
+# ─────────────────────────────────────────────
+# Path setup
+# File lives at: <BASE>/part_B/policies/ADP_policy_18.py
+# ─────────────────────────────────────────────
+_POLICY_DIR = os.path.dirname(os.path.abspath(__file__))
+_PART_B_DIR = os.path.dirname(_POLICY_DIR)
+_BASE_DIR   = os.path.dirname(_PART_B_DIR)   # repo root
 
-# ── Hyperparameters ───────────────────────────────────────────────────────────
-N_SCENARIOS   = 20    # more scenarios = more stable estimate
-N_HEAT_LEVELS = 5     # 0, 25%, 50%, 75%, 100% of P_MAX
+for _p in [_BASE_DIR, _PART_B_DIR]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-_HEAT_LEVELS = [round(i / (N_HEAT_LEVELS - 1) * _P_MAX, 4)
-                for i in range(N_HEAT_LEVELS)]
+# ─────────────────────────────────────────────
+# Load trained weights (eta.pkl from repo root)
+# ─────────────────────────────────────────────
+_ETA_PATH = os.path.join(_BASE_DIR, "eta.pkl")
+with open(_ETA_PATH, "rb") as _f:
+    ETA = pickle.load(_f)
+
+# ─────────────────────────────────────────────
+# Project imports
+# ─────────────────────────────────────────────
+from part_A.SystemCharacteristics import get_fixed_data
+from part_B.PriceProcessRestaurant import price_model
+from part_B.OccupancyProcessRestaurant import next_occupancy_levels
+
+# ─────────────────────────────────────────────
+# System data (loaded once, cached)
+# ─────────────────────────────────────────────
+_DATA_CACHE = None
+
+def _get_data():
+    global _DATA_CACHE
+    if _DATA_CACHE is None:
+        _DATA_CACHE = get_fixed_data()
+    return _DATA_CACHE
 
 
-# ── Candidate actions ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────
+K     = 20      # number of scenarios for exogenous sampling
+M_BIG = 100.0   # big-M for binary indicator constraints
+EPS   = 0.01    # small epsilon to approximate strict inequalities
 
-def _candidate_actions(state):
+
+# ─────────────────────────────────────────────
+# Scenario sampling
+# ─────────────────────────────────────────────
+
+def _sample_scenarios(state):
     """
-    Return all feasible action dicts given current state constraints.
+    Sample K realisations of next-step exogenous variables from process models.
 
-    Feasibility rules from RestaurantEnv:
-      vent_counter > 0    → ventilation must stay ON
-      low_override_r1 = 1 → heater r1 will be forced to P_MAX by env anyway,
-                            so only submit p1=0 to pass the feasibility check
-      low_override_r2 = 1 → same for r2
+    price_model(price_t, price_previous) gives samples of the CURRENT step's
+    price (the state carries the previous step's price, so one call of
+    price_model steps us forward to the price being used right now).
+
+    Returns scalar means used as proxies inside the MILP.
     """
-    vent_counter = state['vent_counter']
-    low_r1       = state['low_override_r1']
-    low_r2       = state['low_override_r2']
+    prices = [price_model(state["price_t"], state["price_previous"])
+              for _ in range(K)]
+    occs   = [next_occupancy_levels(state["Occ1"], state["Occ2"])
+              for _ in range(K)]
 
-    vent_options = [1] if vent_counter > 0 else [0, 1]
-    p1_options   = [0.0] if low_r1 == 1 else _HEAT_LEVELS
-    p2_options   = [0.0] if low_r2 == 1 else _HEAT_LEVELS
+    price_mean = float(np.mean(prices))
+    occ1_mean  = float(np.mean([o[0] for o in occs]))
+    occ2_mean  = float(np.mean([o[1] for o in occs]))
 
-    return [
-        {"HeatPowerRoom1": p1, "HeatPowerRoom2": p2, "VentilationON": v}
-        for v  in vent_options
-        for p1 in p1_options
-        for p2 in p2_options
-    ]
+    return price_mean, occ1_mean, occ2_mean
 
 
-# ── Sample next-period uncertainty using process models ───────────────────────
+# ─────────────────────────────────────────────
+# MILP one-step lookahead
+# ─────────────────────────────────────────────
 
-def _sample_next_period(state, n):
+def _solve_milp(state, data, eta_next, price_mean, occ1_mean, occ2_mean):
     """
-    Generate n scenarios for (price_{t+1}, occ1_{t+1}, occ2_{t+1}) using
-    the official process models, conditioned on the current state.
+    Build and solve the one-step lookahead MILP.
 
-    Using the process models (not historical data) ensures scenarios match
-    the distribution the graders use when evaluating the policy.
+    Decision variables  : p1, p2 continuous in [0, P_max]; v binary
+    Auxiliary binaries  : b_low, b_high, b_ok, lr_next  (one set per room)
+    Auxiliary continuous: p_eff, w  (linearisation of p * binary)
+
+    Objective is linear in all variables — standard MILP solvable by Gurobi.
     """
-    scenarios = []
-    for _ in range(n):
-        next_price = price_model(
-            state['price_t'],
-            state['price_previous']
-        )
-        next_occ1, next_occ2 = next_occupancy_levels(
-            state['Occ1'],
-            state['Occ2']
-        )
-        scenarios.append((float(next_price), float(next_occ1), float(next_occ2)))
-    return scenarios
+
+    # ── Unpack state ────────────────────────────────────────────────────
+    t   = state["current_time"]
+    T1  = state["T1"]
+    T2  = state["T2"]
+    H   = state["H"]
+    lr1 = state["low_override_r1"]
+    lr2 = state["low_override_r2"]
+    vc  = state["vent_counter"]
+
+    # ── System parameters ────────────────────────────────────────────────
+    P_max    = data["heating_max_power"]
+    T_out    = data["outdoor_temperature"][t]
+    T_low    = data["temp_min_comfort_threshold"]
+    T_ok     = data["temp_OK_threshold"]
+    T_high   = data["temp_max_comfort_threshold"]
+    P_vent   = data["ventilation_power"]
+    vent_min = data["vent_min_up_time"]
+
+    he      = data["heat_exchange_coeff"]
+    tl      = data["thermal_loss_coeff"]
+    ef      = data["heating_efficiency_coeff"]
+    hv      = data["heat_vent_coeff"]
+    ho      = data["heat_occupancy_coeff"]
+    hu_occ  = data["humidity_occupancy_coeff"]
+    hu_vent = data["humidity_vent_coeff"]
+
+    # ── Pyomo model ──────────────────────────────────────────────────────
+    m = ConcreteModel()
+
+    # Decision variables
+    m.p1 = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.p2 = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.v  = Var(within=Binary)
+
+    # ── Ventilation inertia ──────────────────────────────────────────────
+    if vc > 0:
+        # Ventilation must stay ON; counter decrements by 1
+        m.c_v_forced = Constraint(expr=m.v == 1)
+        vc_next = vc - 1                      # constant integer
+    else:
+        # Fresh start: if v=1, counter becomes vent_min-1 next step; else 0
+        vc_next = (vent_min - 1) * m.v        # linear Pyomo expression
+
+    # ── Dynamics (all linear in p1, p2, v) ──────────────────────────────
+    T1_next = (T1
+               + he * (T2 - T1)
+               - tl * (T1 - T_out)
+               + ef * m.p1
+               - hv * m.v
+               + ho * occ1_mean)
+
+    T2_next = (T2
+               + he * (T1 - T2)
+               - tl * (T2 - T_out)
+               + ef * m.p2
+               - hv * m.v
+               + ho * occ2_mean)
+
+    H_next = H + hu_occ * (occ1_mean + occ2_mean) - hu_vent * m.v
+
+    # ── Binary indicators for temperature thresholds ─────────────────────
+    # b_low  = 1  iff  T_next < T_low   (new low override fires)
+    # b_high = 1  iff  T_next > T_high  (high cutoff fires)
+    # Big-M formulation:
+    #   b=1 iff x <= c:   x >= c - M*b        [b=0 forces x >= c]
+    #                     x <= c - eps + M*(1-b) [b=1 forces x <= c-eps]
+
+    m.b1_low  = Var(within=Binary)
+    m.b2_low  = Var(within=Binary)
+    m.b1_high = Var(within=Binary)
+    m.b2_high = Var(within=Binary)
+
+    # Room 1 — low threshold  (b=1 iff T1_next < T_low)
+    m.c_b1l_1 = Constraint(expr=T1_next >= T_low - M_BIG * m.b1_low)
+    m.c_b1l_2 = Constraint(expr=T1_next <= T_low - EPS + M_BIG * (1 - m.b1_low))
+    # Room 2 — low threshold
+    m.c_b2l_1 = Constraint(expr=T2_next >= T_low - M_BIG * m.b2_low)
+    m.c_b2l_2 = Constraint(expr=T2_next <= T_low - EPS + M_BIG * (1 - m.b2_low))
+
+    # Room 1 — high cutoff  (b=1 iff T1_next > T_high)
+    m.c_b1h_1 = Constraint(expr=T1_next <= T_high + M_BIG * m.b1_high)
+    m.c_b1h_2 = Constraint(expr=T1_next >= T_high + EPS - M_BIG * (1 - m.b1_high))
+    # Room 2 — high cutoff
+    m.c_b2h_1 = Constraint(expr=T2_next <= T_high + M_BIG * m.b2_high)
+    m.c_b2h_2 = Constraint(expr=T2_next >= T_high + EPS - M_BIG * (1 - m.b2_high))
+
+    # A room cannot be simultaneously too cold and too hot
+    m.c_excl1 = Constraint(expr=m.b1_low + m.b1_high <= 1)
+    m.c_excl2 = Constraint(expr=m.b2_low + m.b2_high <= 1)
+
+    # ── Next override state ──────────────────────────────────────────────
+    # lr_next = 1  if override was already active and T_next < T_ok
+    #         = 1  if override was inactive and T_next < T_low  (new trigger)
+    #         = 0  otherwise
+
+    m.lr1_next = Var(within=Binary)
+    m.lr2_next = Var(within=Binary)
+
+    if lr1 == 0:
+        # Enter override only if T1_next < T_low
+        m.c_lr1 = Constraint(expr=m.lr1_next == m.b1_low)
+    else:
+        # Already in override; exit only when T1_next >= T_ok
+        # b1_ok = 1 iff T1_next >= T_ok  → lr1_next = 1 - b1_ok
+        m.b1_ok    = Var(within=Binary)
+        m.c_b1ok_1 = Constraint(expr=T1_next >= T_ok - M_BIG * (1 - m.b1_ok))
+        m.c_b1ok_2 = Constraint(expr=T1_next <= T_ok - EPS + M_BIG * m.b1_ok)
+        m.c_lr1    = Constraint(expr=m.lr1_next == 1 - m.b1_ok)
+
+    if lr2 == 0:
+        m.c_lr2 = Constraint(expr=m.lr2_next == m.b2_low)
+    else:
+        m.b2_ok    = Var(within=Binary)
+        m.c_b2ok_1 = Constraint(expr=T2_next >= T_ok - M_BIG * (1 - m.b2_ok))
+        m.c_b2ok_2 = Constraint(expr=T2_next <= T_ok - EPS + M_BIG * m.b2_ok)
+        m.c_lr2    = Constraint(expr=m.lr2_next == 1 - m.b2_ok)
+
+    # Override and high cutoff are mutually exclusive (physically)
+    m.c_excl_lr1 = Constraint(expr=m.lr1_next + m.b1_high <= 1)
+    m.c_excl_lr2 = Constraint(expr=m.lr2_next + m.b2_high <= 1)
+
+    # ── Effective powers ─────────────────────────────────────────────────
+    # p1_eff = P_max  if lr1_next = 1   (low override → max heating)
+    #        = 0      if b1_high  = 1   (high cutoff  → no heating)
+    #        = p1     otherwise
+    #
+    # Written as: p1_eff = P_max * lr1_next + p1 * s1
+    #   where s1 = 1 - lr1_next - b1_high  (∈ {0,1}, mutually exclusive)
+    #
+    # Linearise  w1 = p1 * s1  via McCormick (s1 binary, p1 ∈ [0, P_max]):
+    #   w1 <= P_max * s1
+    #   w1 >= p1 - P_max*(1-s1)
+    #   w1 <= p1
+    #   w1 >= 0
+
+    m.p1_eff = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.w1     = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.c_w1_1   = Constraint(expr=m.w1 <= P_max * (1 - m.lr1_next - m.b1_high))
+    m.c_w1_2   = Constraint(expr=m.w1 >= m.p1 - P_max * (m.lr1_next + m.b1_high))
+    m.c_w1_3   = Constraint(expr=m.w1 <= m.p1)
+    m.c_p1_eff = Constraint(expr=m.p1_eff == P_max * m.lr1_next + m.w1)
+
+    m.p2_eff = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.w2     = Var(within=NonNegativeReals, bounds=(0, P_max))
+    m.c_w2_1   = Constraint(expr=m.w2 <= P_max * (1 - m.lr2_next - m.b2_high))
+    m.c_w2_2   = Constraint(expr=m.w2 >= m.p2 - P_max * (m.lr2_next + m.b2_high))
+    m.c_w2_3   = Constraint(expr=m.w2 <= m.p2)
+    m.c_p2_eff = Constraint(expr=m.p2_eff == P_max * m.lr2_next + m.w2)
+
+    # ── Objective ────────────────────────────────────────────────────────
+    # Immediate cost: sampled price mean proxies for the current step price
+    immediate = price_mean * (m.p1_eff + m.p2_eff + P_vent * m.v)
+
+    # Value function at next state.
+    # Feature order matches FEATURE_COLS in train_adp.py:
+    #   [T1, T2, H, Occ1, Occ2, price_t, price_previous, vent_counter,
+    #    low_override_r1, low_override_r2, bias]
+    #
+    # Separate constant terms (plain floats) from Pyomo expression terms
+    # to avoid type-mixing issues.
+    vf_const = (  eta_next[3]  * occ1_mean
+                + eta_next[4]  * occ2_mean
+                + eta_next[5]  * price_mean        # price_t at t+1
+                + eta_next[6]  * state["price_t"]  # price_previous at t+1
+                + eta_next[10]                     # bias
+               )
+
+    vf_expr  = (  eta_next[0]  * T1_next
+                + eta_next[1]  * T2_next
+                + eta_next[2]  * H_next
+                + eta_next[7]  * vc_next
+                + eta_next[8]  * m.lr1_next
+                + eta_next[9]  * m.lr2_next
+               )
+
+    m.obj = Objective(expr=immediate + vf_const + vf_expr, sense=minimize)
+
+    # ── Solve ─────────────────────────────────────────────────────────────
+    solver = SolverFactory("gurobi")
+    solver.options["OutputFlag"] = 0
+    solver.options["TimeLimit"]  = 12
+    solver.solve(m)
+
+    p1_val = float(max(0.0, min(P_max, value(m.p1))))
+    p2_val = float(max(0.0, min(P_max, value(m.p2))))
+    v_val  = int(round(value(m.v)))
+
+    return {
+        "HeatPowerRoom1": p1_val,
+        "HeatPowerRoom2": p2_val,
+        "VentilationON":  v_val,
+    }
 
 
-# ── Evaluate one action ───────────────────────────────────────────────────────
-
-def _evaluate_action(state, action, data, occupancy, t):
-    """
-    Expected total cost for one action under the Bellman equation:
-
-        Q(s, a) = c_t(s, a)  +  (1/N) * Σ_n V̂_{t+1}(s'_n)
-
-    Step 1 — deterministic transition with known current values:
-              call step_env → get next_state and immediate cost.
-              No scenario patching here — current price and occupancy
-              are already known.
-
-    Step 2 — approximate E[V̂_{t+1}(s')] by sampling N scenarios from
-              the process models, patching next_state with each sampled
-              (price_{t+1}, occ1_{t+1}, occ2_{t+1}), and averaging.
-    """
-    # Step 1 — deterministic transition (current values are known)
-    next_state, cost, _ = step_env(state, action, data, occupancy)
-
-    # Terminal hour — no future value
-    if t + 1 >= T_END:
-        return float(cost)
-
-    # Step 2 — expected future value via process model sampling
-    scenarios = _sample_next_period(state, N_SCENARIOS)
-    futures   = []
-
-    for (sc_price, sc_occ1, sc_occ2) in scenarios:
-        # Patch next_state with sampled next-period values.
-        # These are the uncertain quantities not yet revealed at hour t.
-        ns = dict(next_state)
-        ns['price_previous'] = next_state['price_t']  # shift price history
-        ns['price_t']        = sc_price
-        ns['Occ1']           = sc_occ1
-        ns['Occ2']           = sc_occ2
-
-        futures.append(estimate_value(ns, _thetas[t + 1], _mu, _sigma))
-
-    return float(cost) + float(np.mean(futures))
-
-
-# ── Main policy function ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# Public policy function (imported by running_script)
+# ─────────────────────────────────────────────
 
 def select_action(state):
     """
     ADP one-step lookahead policy.
 
-    Implements the Bellman optimality equation:
-        a* = argmin_a [ c_t(s,a) + E[V̂_{t+1}(s'(s,a,ξ))] ]
+    Steps:
+      1. Sample K scenarios from process models to get price/occupancy means
+      2. Solve MILP with VF term eta_{t+1}  (or skip VF at last step t=9)
+      3. Return optimal (p1, p2, v)
 
-    Parameters
-    ----------
-    state : dict — current environment state from RestaurantEnv
-
-    Returns
-    -------
-    dict with keys HeatPowerRoom1, HeatPowerRoom2, VentilationON
+    Args:
+        state : dict from RestaurantEnv.reset_env / step_env
+    Returns:
+        HereAndNowActions: dict with keys HeatPowerRoom1, HeatPowerRoom2, VentilationON
     """
-    t = state['current_time']
+    try:
+        t    = state["current_time"]
+        data = _get_data()
 
-    # Build data and occupancy dicts for step_env.
-    # Only index t is read by step_env — fill all positions with known
-    # current values so no patching is needed during action evaluation.
-    data = copy.deepcopy(_base_data)
-    data['price'] = [state['price_t']] * T_END
+        price_mean, occ1_mean, occ2_mean = _sample_scenarios(state)
 
-    occupancy = {
-        'Room1': [state['Occ1']] * T_END,
-        'Room2': [state['Occ2']] * T_END,
-    }
+        if t >= 9:
+            # Last step: no future value — minimise immediate cost.
+            # Best action is to heat as little as possible; the overrule
+            # controller handles any temperature constraint violations.
+            v = 1 if state["vent_counter"] > 0 else 0
+            HereAndNowActions = {
+                "HeatPowerRoom1": 0.0,
+                "HeatPowerRoom2": 0.0,
+                "VentilationON":  v,
+            }
+            return HereAndNowActions
 
-    candidates  = _candidate_actions(state)
-    best_action = candidates[0]
-    best_total  = float('inf')
+        eta_next = ETA[t + 1]
+        result   = _solve_milp(state, data, eta_next,
+                               price_mean, occ1_mean, occ2_mean)
 
-    for action in candidates:
-        total = _evaluate_action(state, action, data, occupancy, t)
-        if total < best_total:
-            best_total  = total
-            best_action = action
+        HereAndNowActions = {
+            "HeatPowerRoom1": result["HeatPowerRoom1"],
+            "HeatPowerRoom2": result["HeatPowerRoom2"],
+            "VentilationON":  result["VentilationON"],
+        }
+        return HereAndNowActions
 
-    return best_action
+    except Exception as e:
+        print(f"  [ADP ERROR: {e}]  — using fallback")
+        v = 1 if state.get("vent_counter", 0) > 0 else 0
+        HereAndNowActions = {
+            "HeatPowerRoom1": 0.0,
+            "HeatPowerRoom2": 0.0,
+            "VentilationON":  v,
+        }
+        return HereAndNowActions

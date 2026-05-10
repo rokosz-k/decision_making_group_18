@@ -19,7 +19,7 @@ import copy
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(BASE_DIR)
 
 from part_A.SystemCharacteristics import get_fixed_data
@@ -166,6 +166,6 @@ def collect_samples(policy_fn, output_path="samples.csv"):
 
 if __name__ == "__main__":
     policy_fn   = dummy_policy                      # ← swap policy here
-    output_path = "samples_dummy.csv"               # ← swap output name here
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_dummy.csv") # ← swap output name here       
 
     collect_samples(policy_fn, output_path)

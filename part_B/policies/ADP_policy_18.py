@@ -43,7 +43,7 @@ for _p in [_BASE_DIR, _PART_B_DIR]:
 # ─────────────────────────────────────────────
 # Load trained weights (eta.pkl from repo root)
 # ─────────────────────────────────────────────
-_ETA_PATH = os.path.join(_BASE_DIR, "eta.pkl")
+_ETA_PATH = os.path.join(_PART_B_DIR, "ADP_training", "eta.pkl")
 with open(_ETA_PATH, "rb") as _f:
     ETA = pickle.load(_f)
 
@@ -70,7 +70,7 @@ def _get_data():
 # Constants
 # ─────────────────────────────────────────────
 K     = 20      # number of scenarios for exogenous sampling
-M_BIG = 100.0   # big-M for binary indicator constraints
+M_BIG = 1e6     # big-M for binary indicator constraints (matches OIH)
 EPS   = 0.01    # small epsilon to approximate strict inequalities
 
 
@@ -174,6 +174,12 @@ def _solve_milp(state, data, eta_next, price_mean, occ1_mean, occ2_mean):
                + ho * occ2_mean)
 
     H_next = H + hu_occ * (occ1_mean + occ2_mean) - hu_vent * m.v
+
+    # ── Humidity trigger (matches OIH hum_trigger_rule) ─────────────────
+    # If H_next > H_high the environment forces v=1 regardless of our choice.
+    # We model this explicitly so the MILP accounts for the forced ventilation cost.
+    H_high = data["humidity_threshold"]
+    m.c_hum_trigger = Constraint(expr=H_next <= H_high + M_BIG * m.v)
 
     # ── Binary indicators for temperature thresholds ─────────────────────
     # b_low  = 1  iff  T_next < T_low   (new low override fires)

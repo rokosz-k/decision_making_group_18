@@ -82,7 +82,7 @@ for day in range(num_days):
     total_cost = 0.0
 
     while not done:
-        action            =  get_action(select_action, state)
+        action            = get_action(select_action, state)
         state, cost, done = step_env(state, action, data, occupancy)
         total_cost       += cost
 

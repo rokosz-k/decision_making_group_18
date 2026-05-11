@@ -56,7 +56,7 @@ def build_features(df_hour):
     return X, y
 
 
-def train(samples_path="samples_dummy.csv", output_path="eta.pkl", ridge_lambda=10.0):
+def train(samples_path="samples_mixed.csv", output_path="eta_mixed.pkl", ridge_lambda=10.0):
     """
     Fit eta_t for each hour t via Ridge regression and save to output_path.
 
@@ -129,8 +129,8 @@ def train(samples_path="samples_dummy.csv", output_path="eta.pkl", ridge_lambda=
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    samples_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(base_dir, "samples_dummy.csv")
+    samples_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(base_dir, "samples_mixed.csv")
     ridge_lambda = float(sys.argv[2]) if len(sys.argv) > 2 else 10.0
-    output_path  = os.path.join(base_dir, "eta.pkl")
+    output_path  = os.path.join(base_dir, "eta_mix.pkl")
 
     train(samples_path, output_path, ridge_lambda)

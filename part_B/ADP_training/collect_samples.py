@@ -165,7 +165,8 @@ def collect_samples(policy_fn, output_path="samples.csv"):
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    policy_fn   = dummy_policy                      # ← swap policy here
-    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_dummy.csv") # ← swap output name here       
+    from part_B.policies.SP_policy_18 import select_action as policy_fn
+    # policy_fn   = dummy_policy   # if you want to use dummy policy 
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_sp_v1.csv") # swap output name here       
 
     collect_samples(policy_fn, output_path)

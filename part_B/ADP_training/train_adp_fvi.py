@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-train_adp_fvi.py  –  Fitted Value Iteration (FVI) training for ADP policy
+train_adp_fvi.py  -  Fitted Value Iteration (FVI) training for ADP policy
 ============================================================================
 
 HOW THIS DIFFERS FROM train_adp.py (Approximate Backward Induction):

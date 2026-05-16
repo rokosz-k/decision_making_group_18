@@ -6,4 +6,5 @@
 __pycache__/
 
 # VS Code files
-.vscode/
+.vscode/__pycache__/
+*.pyc

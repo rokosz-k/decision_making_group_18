@@ -4,12 +4,11 @@ everything up to the overrule controllers.
 """
 
 
+DUMMY_ACTION = {
+    "HeatPowerRoom1": 0.0,
+    "HeatPowerRoom2": 0.0,
+    "VentilationON":  0
+}
+
 def dummy_action(state):
-
-    HereAndNowActions = {
-        "HeatPowerRoom1": 0,   # No heating in room 1
-        "HeatPowerRoom2": 0,   # No heating in room 2
-        "VentilationON":  0    # Ventilation OFF
-    }
-
-    return HereAndNowActions
+    return DUMMY_ACTION

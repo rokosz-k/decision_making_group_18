@@ -24,20 +24,25 @@ Algorithm (from lecture):
         target[n] = min_{feasible u} { (1/K) Σ_k [ cost_k + V̂(s'_k ; eta_{t+1}) ] }
       Fit eta_t via Ridge on (features[n], target[n])
 
-CONVENTIONS — identical to train_adp.py for fair comparison:
+CONVENTIONS — identical to train_adp_new_features.py for fair comparison:
 --------------------------------------------------------------
   - Feature order  : T1, T2, H, price_t, price_previous,
-                     vent_counter, low_override_sum, bias (LAST)
+                     vent_counter, low_override_r1, low_override_r2, bias (LAST)
   - Regularisation : ridge_lambda = 10.0, bias NOT penalised
   - Scaling        : StandardScaler on raw features (not bias),
                      weights converted back to raw space before saving
-  - Output format  : eta_fvi.pkl  —  dict {t: np.array shape (8,)} RAW space
+  - Output format  : eta_fvi.pkl  —  dict {t: np.array shape (9,)} RAW space
                      No mu/sigma files needed — policy uses raw state values
+
+v2 changes (vs original):
+  - Imports v2_SystemCharacteristics (fixed initial state for T, H; random for price/occ)
+  - Loads v2_PriceData.csv (11 cols: col 0 = price_previous, cols 1-10 = hourly prices)
+  - Cold-start only — no warm-start from stale pre-v2 eta pkl
 
 Usage:
     python train_adp_fvi.py                      # defaults
-    python train_adp_fvi.py samples_dummy.csv    # custom samples
-    python train_adp_fvi.py samples_dummy.csv 5  # custom lambda
+    python train_adp_fvi.py samples_sp.csv       # custom samples
+    python train_adp_fvi.py samples_sp.csv 5     # custom lambda
 """
 
 import os
@@ -53,18 +58,19 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR   = os.path.dirname(os.path.dirname(SCRIPT_DIR))   # repo root
 sys.path.append(BASE_DIR)
 
-from part_A.SystemCharacteristics import get_fixed_data
+# ── v2 imports ────────────────────────────────────────────────────────────────
+from data.v2_SystemCharacteristics import get_fixed_data   # FIX 1: was part_A.SystemCharacteristics
 from part_B.RestaurantEnv import step_env
 
 # ── Hyper-parameters ──────────────────────────────────────────────────────────
 T_END        = 10     # hourly timesteps per day
 N            = 300    # sampled states per timestep (from samples CSV)
 K            = 20     # future scenarios per state (Monte Carlo expectation)
-I_ITER       = 10      # FVI iterations
-RIDGE_LAMBDA = 10.0   # same as train_adp.py for fair comparison
+I_ITER       = 10     # FVI iterations
+RIDGE_LAMBDA = 10.0   # same as train_adp_new_features.py for fair comparison
 SEED         = 42
 
-# ── Feature definition — must match train_adp.py FEATURE_COLS ─────────────────
+# ── Feature definition — must match train_adp_new_features.py FEATURE_COLS ───
 # Bias is NOT listed here; it is appended as the last column in build_features.
 FEATURE_COLS = [
     "T1",
@@ -76,8 +82,8 @@ FEATURE_COLS = [
     "low_override_r1",
     "low_override_r2",
 ]
-N_RAW = len(FEATURE_COLS)       # 8 raw features
-N_FEAT = N_RAW + 1              # 9 total (raw + bias)
+N_RAW  = len(FEATURE_COLS)   # 8 raw features
+N_FEAT = N_RAW + 1           # 9 total (raw + bias)
 
 # ── Action grid ───────────────────────────────────────────────────────────────
 # Cost and VF are both linear in P1, P2 → optimum is always at a boundary.
@@ -98,10 +104,10 @@ ALL_ACTIONS = [
 
 def compute_features_raw(state):
     """
-    Returns the raw feature vector of shape (N_FEAT,) = (8,).
+    Returns the raw feature vector of shape (N_FEAT,) = (9,).
     Order: [T1, T2, H, price_t, price_previous, vent_counter,
-            low_override_sum, bias]
-    Bias is last — matches train_adp.py convention.
+            low_override_r1, low_override_r2, bias]
+    Bias is last — matches train_adp_new_features.py convention.
     """
     return np.array([
         float(state['T1']),
@@ -119,7 +125,7 @@ def compute_features_raw(state):
 def estimate_value(state, eta_raw):
     """
     V̂(state) = eta_raw^T · phi_raw(state).
-    Uses RAW feature space — no normalisation needed (same as train_adp.py policy).
+    Uses RAW feature space — no normalisation needed.
     Returns 0.0 at or beyond the terminal timestep (boundary condition V_T = 0).
     """
     if state['current_time'] >= T_END:
@@ -131,41 +137,19 @@ def estimate_value(state, eta_raw):
 def fit_eta(features_raw, targets, ridge_lambda):
     """
     Fits eta via Ridge regression on scaled features, then converts back to
-    raw feature space. Identical procedure to train_adp.py.
-
-    Steps:
-      1. Scale raw features (not bias) with StandardScaler
-      2. Solve Ridge: eta_scaled = (X^T X + Lambda)^{-1} X^T y
-         with Lambda[-1,-1] = 0  (bias not penalised)
-      3. Convert eta_scaled -> eta_raw so V̂ = eta_raw^T · phi_raw
-
-    Parameters
-    ----------
-    features_raw : np.ndarray (n_states, N_FEAT) — raw features inc. bias col
-    targets      : np.ndarray (n_states,)
-    ridge_lambda : float
-
-    Returns
-    -------
-    eta_raw : np.ndarray (N_FEAT,) in raw feature space
-    r2      : float — R² on scaled fit
+    raw feature space. Identical procedure to train_adp_new_features.py.
     """
     n = len(targets)
 
-    # Scale raw features (columns 0..N_RAW-1), leave bias column out
     scaler   = StandardScaler()
     X_sc     = scaler.fit_transform(features_raw[:, :N_RAW])
-    X_sc_b   = np.hstack([X_sc, np.ones((n, 1))])   # add bias back as last col
+    X_sc_b   = np.hstack([X_sc, np.ones((n, 1))])
 
-    # Ridge: (X^T X + Lambda) eta = X^T y, bias not penalised
     Lambda         = ridge_lambda * np.eye(N_FEAT)
     Lambda[-1, -1] = 0.0
     eta_scaled     = np.linalg.solve(X_sc_b.T @ X_sc_b + Lambda,
                                      X_sc_b.T @ targets)
 
-    # Convert back to raw space (same algebra as train_adp.py)
-    #   V̂ = eta_sc[:n] @ (X_raw - mean)/std  +  eta_sc[n]
-    #      = (eta_sc[:n]/std) @ X_raw  -  sum(eta_sc[:n]*mean/std)  +  eta_sc[n]
     eta_raw         = np.zeros(N_FEAT)
     eta_raw[:N_RAW] = eta_scaled[:N_RAW] / scaler.scale_
     eta_raw[N_RAW]  = (eta_scaled[N_RAW]
@@ -173,7 +157,6 @@ def fit_eta(features_raw, targets, ridge_lambda):
                                 * scaler.mean_
                                 / scaler.scale_))
 
-    # R² on scaled fit (what Ridge actually optimised)
     y_pred = X_sc_b @ eta_scaled
     ss_res = np.sum((targets - y_pred) ** 2)
     ss_tot = np.sum((targets - targets.mean()) ** 2)
@@ -191,8 +174,6 @@ def compute_target(state, base_data, price_k, occ1_k, occ2_k, eta_next_raw):
     FVI Bellman target for a single state x_{n,t}:
 
         V*(x_{n,t}) = min_{feasible u} { (1/K) Σ_k [ cost_k + V̂(s'_k ; eta_{t+1}) ] }
-
-    base_data is modified in-place (price[t]) and must be restored by the caller.
     """
     t = state['current_time']
 
@@ -203,7 +184,6 @@ def compute_target(state, base_data, price_k, occ1_k, occ2_k, eta_next_raw):
         else ALL_ACTIONS
     )
 
-    # Reusable occupancy dict — only index t is read by step_env
     occ_scenario = {"Room1": [0] * T_END, "Room2": [0] * T_END}
 
     best_value = np.inf
@@ -211,13 +191,11 @@ def compute_target(state, base_data, price_k, occ1_k, occ2_k, eta_next_raw):
     for action in feasible:
         total = 0.0
         for k in range(K):
-            # Inject scenario into base_data and occ_scenario (in-place)
             base_data['price'][t]    = float(price_k[k])
-            occ_scenario["Room1"][t] = int(occ1_k[k])
-            occ_scenario["Room2"][t] = int(occ2_k[k])
+            occ_scenario["Room1"][t] = float(occ1_k[k])
+            occ_scenario["Room2"][t] = float(occ2_k[k])
 
             next_state, cost, _ = step_env(state, action, base_data, occ_scenario)
-
             total += cost + estimate_value(next_state, eta_next_raw)
 
         avg = total / K
@@ -235,10 +213,15 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
 
     rng = np.random.default_rng(seed=SEED)
 
-    # ── Load system data ──────────────────────────────────────────────────────
+    # ── Load system data (v2) ─────────────────────────────────────────────────
     base_data = get_fixed_data()
 
-    price_data = pd.read_csv(os.path.join(BASE_DIR, "data", "PriceData.csv")).values
+    # FIX 2: use v2_PriceData.csv (11 cols: col 0 = price_previous, cols 1-10 = hourly prices)
+    v2_price_raw = pd.read_csv(
+        os.path.join(BASE_DIR, "data", "v2_PriceData.csv")
+    ).values                              # shape (100, 11)
+    price_data = v2_price_raw[:, 1:]     # cols 1-10 → hourly prices, shape (100, 10)
+
     occ1_data  = pd.read_csv(os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")).values
     occ2_data  = pd.read_csv(os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")).values
     num_days   = price_data.shape[0]
@@ -246,6 +229,7 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
     print(f"Loading samples from : {samples_path}")
     print(f"Ridge lambda         : {ridge_lambda}")
     print(f"FVI iterations       : {I_ITER}  |  K scenarios : {K}")
+    print(f"Price data shape     : {price_data.shape}  (after stripping price_previous col)")
 
     # ── Load sampled states ───────────────────────────────────────────────────
     if not os.path.exists(samples_path):
@@ -259,31 +243,19 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
     print(f"Days found   : {df['day'].nunique()}")
     print(f"Total rows   : {len(df)}")
 
-    # Group by timestep, cap at N per timestep
     states_by_t = {}
     for t in range(T_END):
         df_t = states_by_t[t] = df[df['hour'] == t].head(N).to_dict(orient='records')
         print(f"  t={t}: {len(df_t)} states loaded")
 
-    # Pre-sample scenario day indices — fixed across all FVI iterations
-    # scenario_days[t, n] gives K day indices for state n at timestep t
+    # Pre-sample scenario day indices
     scenario_days = rng.integers(0, num_days, size=(T_END, N, K))
 
-    # ── Initialise etas in RAW space ──────────────────────────────────────────
-    # Warm-start from existing BI solution if available; cold-start otherwise.
-    existing_path = os.path.join(SCRIPT_DIR, "eta_new_features_v2.pkl")
-    if os.path.exists(existing_path):
-        with open(existing_path, 'rb') as f:
-            existing_eta = pickle.load(f)
-        eta = {t: existing_eta.get(t, np.zeros(N_FEAT)) for t in range(T_END)}
-        print(f"\nWarm start from {os.path.basename(existing_path)}")
-    else:
-        eta = {t: np.zeros(N_FEAT) for t in range(T_END)}
-        print("\nCold start: etas initialised to zeros.")
+    # FIX 3: always cold-start — no warm-start from pre-v2 stale eta
+    eta = {t: np.zeros(N_FEAT) for t in range(T_END)}
+    print("\nCold start: etas initialised to zeros (v2 — no stale warm-start).")
 
-    # price is not in get_fixed_data() — initialise as placeholder list.
-    # compute_target overwrites base_data['price'][t] per scenario, so no
-    # save/restore needed — the value at each index is always set before use.
+    # price placeholder — compute_target overwrites base_data['price'][t] per scenario
     base_data['price'] = [0.0] * T_END
 
     # ── FVI main loop ─────────────────────────────────────────────────────────
@@ -296,20 +268,21 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
 
         new_eta = {}
 
-        # Backward sweep: t = T_END-1 → 0
         for t in range(T_END - 1, -1, -1):
             states   = states_by_t[t]
             n_states = len(states)
-            t_next   = min(t + 1, T_END - 1)   # clamp for scenario indexing
+            t_next   = min(t + 1, T_END - 1)
 
-            # eta_{t+1}: zeros at last step (V_T = 0 boundary condition)
-            eta_next_raw = new_eta.get(t + 1, np.zeros(N_FEAT))
+            # TRUE FVI: use PREVIOUS iteration's eta for future value estimate.
+            # Using new_eta here would make every iteration identical (single-pass BI).
+            eta_next_raw = eta.get(t + 1, np.zeros(N_FEAT))
 
             targets      = np.zeros(n_states)
             features_raw = np.zeros((n_states, N_FEAT))
 
             for n, state in enumerate(states):
                 days_k  = scenario_days[t, n]
+                # price_data is already sliced to cols 1-10 → index directly by t_next
                 price_k = price_data[days_k, t_next]
                 occ1_k  = occ1_data[days_k,  t_next]
                 occ2_k  = occ2_data[days_k,  t_next]
@@ -321,7 +294,6 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
                 )
                 features_raw[n] = compute_features_raw(state)
 
-            # Fit eta_t (Ridge scaled internally, stored as raw)
             new_eta[t], r2 = fit_eta(features_raw, targets, ridge_lambda)
 
             print(f"  t={t:2d}  {n_states:>6}  {r2:>8.4f}  "
@@ -344,8 +316,8 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
 
 if __name__ == "__main__":
     samples_path = (sys.argv[1] if len(sys.argv) > 1
-                    else os.path.join(SCRIPT_DIR, "samples_mixed_v2.csv"))
+                    else os.path.join(SCRIPT_DIR, "samples/samples_sp_fvi.csv"))
     ridge_lambda = float(sys.argv[2]) if len(sys.argv) > 2 else RIDGE_LAMBDA
-    output_path  = os.path.join(SCRIPT_DIR, "eta_fvi.pkl")
+    output_path  = os.path.join(SCRIPT_DIR, "eta_sp_fvi.pkl")
 
     train(samples_path, output_path, ridge_lambda)

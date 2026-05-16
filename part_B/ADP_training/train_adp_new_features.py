@@ -170,8 +170,8 @@ if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     samples_path = (sys.argv[1] if len(sys.argv) > 1
-                    else os.path.join(base_dir, "samples_mixed_v2.csv"))
+                    else os.path.join(base_dir, "samples_mixed_v3_fixed.csv"))
     ridge_lambda = float(sys.argv[2]) if len(sys.argv) > 2 else 10.0
-    output_path  = os.path.join(base_dir, "eta_new_features_v2.pkl")
+    output_path  = os.path.join(base_dir, "eta_new_features_v3_fixed.pkl")
 
     train(samples_path, output_path, ridge_lambda)

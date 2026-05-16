@@ -1,5 +1,6 @@
 import sys
 import os
+import itertools
 import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
@@ -94,7 +95,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.pi       = Param(m.Omega, initialize=data["pi"])
     m.price    = Param(m.Omega, m.L, initialize=data["price"])
     m.occ      = Param(m.Omega, m.R, m.L, initialize=data["occ"])
-    m.T_out    = Param(m.L, initialize={t: sys_characteristics["outdoor_temperature"][t - 1] for t in L})
+    m.T_out    = Param(m.L, initialize={t: sys_characteristics["outdoor_temperature"][t] for t in L})
     m.P_bar    = Param(m.R, initialize=sys_characteristics["heating_max_power"])
     m.P_vent   = Param(initialize=sys_characteristics["ventilation_power"])
 
@@ -103,8 +104,8 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.T_high   = Param(initialize=sys_characteristics["temp_max_comfort_threshold"])
     m.H_high   = Param(initialize=sys_characteristics["humidity_threshold"])
     m.U_vent   = Param(initialize=sys_characteristics["vent_min_up_time"], within=pyo.NonNegativeIntegers)
-    m.M_temp   = Param(initialize=1e6) # We can lower big-Ms
-    m.M_hum    = Param(initialize=1e6)
+    m.M_temp   = Param(initialize=1e3) # We can lower big-Ms
+    m.M_hum    = Param(initialize=1e3)
 
     m.zeta_exch = Param(initialize=sys_characteristics["heat_exchange_coeff"])
     m.zeta_loss = Param(initialize=sys_characteristics["thermal_loss_coeff"])
@@ -154,11 +155,11 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     # Helper: get T or H at t-1, using initial condition at tau
     # ------------------------------------------------------------------
-    def T_prev(om, r, t):
-        return m.T_init[r] if t == tau else m.T[om, r, t - 1]
+    #def T_prev(om, r, t): # DELETE
+    #    return m.T_init[r] if t == tau else m.T[om, r, t - 1]
 
-    def H_prev(om, t):
-        return m.H_init if t == tau else m.H[om, t - 1]
+    #def H_prev(om, t): # DELETE
+    #    return m.H_init if t == tau else m.H[om, t - 1]
 
     def v_prev_val(om, t):
         return value(m.v_prev) if t == tau else m.v[om, t - 1]
@@ -180,9 +181,12 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     def temp_dynamics_rule(m, om, r, t):
         r_other = [rr for rr in R if rr != r][0]   # the other room
         return m.T[om, r, t] == (
-            T_prev(om, r, t)
-            + m.zeta_exch * (T_prev(om, r_other, t) - T_prev(om, r, t))
-            - m.zeta_loss * (T_prev(om, r, t) - m.T_out[t - 1])
+            #T_prev(om, r, t)   # old
+            m.T[om, r, t-1]     # new
+            #+ m.zeta_exch * (T_prev(om, r_other, t) - T_prev(om, r, t))    # old
+            + m.zeta_exch * (m.T[om, r_other, t - 1] - m.T[om, r, t - 1])   # new
+            #- m.zeta_loss * (T_prev(om, r, t) - m.T_out[t - 1])    # old
+            - m.zeta_loss * (m.T[om, r, t - 1] - m.T_out[t - 1]) # new
             + m.zeta_conv * m.p[om, r, t - 1]
             - m.zeta_cool * v_prev_val(om, t)
             + m.zeta_occ  * m.occ[om, r, t - 1]
@@ -194,7 +198,8 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     def hum_dynamics_rule(m, om, t):
         return m.H[om, t] == (
-            H_prev(om, t)
+            #H_prev(om, t)  # old
+            m.H[om, t - 1]  # new
             + m.eta_occ  * sum(m.occ[om, r, t - 1] for r in m.R)
             - m.eta_vent * v_prev_val(om, t)
         )
@@ -390,22 +395,20 @@ def sample(price_t, price_previous, r1_current, r2_current, S):
         price_previous (float): Previous price (at t-1).
         r1_current (float): Current occupancy in room 1.
         r2_current (float): Current occupancy in room 2.
-        S (int): Sampling factor (number of samples generated).
+        S (int): Sampling factor (number of individual samples per uncertain variable).
     Returns:
-        numpy.ndarray: (S, 3) stack, where each row is one [price, occ1, occ2] sample.
+        numpy.ndarray: (S, 3) stack, where each row is one [price, occ1, occ2] joint realization.
     """
-    num_paths = S # Number of samples
-    sampled_price = []
-    sampled_occ1 = []
-    sampled_occ2 = []
+    # Sample S values for each variable independently
+    sampled_price = [price_model(price_t, price_previous) for _ in range(S)]
+    sampled_occ = [next_occupancy_levels(r1_current, r2_current) for _ in range(S)]
+    sampled_occ1 = [o[0] for o in sampled_occ]
+    sampled_occ2 = [o[1] for o in sampled_occ]
 
-    for i in range(num_paths):
-        sampled_price.append(price_model(price_t, price_previous))
-        sampled_occ1.append(next_occupancy_levels(r1_current, r2_current)[0])
-        sampled_occ2.append(next_occupancy_levels(r1_current, r2_current)[1])
+    # Create all S^3 joint combinations via cartesian product
+    combinations = list(itertools.product(sampled_price, sampled_occ1, sampled_occ2))
 
-    # Assemble (S, 3) stack - each row is one [price, occ1, occ2] sample
-    return np.column_stack([sampled_price, sampled_occ1, sampled_occ2])
+    return np.array(combinations)  # shape: (S^3, 3)
 
 def build_scenario_tree(state, L, K, S):
     """
@@ -438,10 +441,12 @@ def build_scenario_tree(state, L, K, S):
             r1_current = node.value[1]
             r2_current = node.value[2]
             samples = sample(price_t, price_previous, r1_current, r2_current, S)
-            sample_probs = np.full(S, 1.0 / S) # Each sample gets probability 1/S
+            S_joint = len(samples)
+            #print("There are", S_joint, "joint uncertainty scenarios")
+            sample_probs = np.full(S_joint, 1.0 / S_joint) # Each sample gets probability 1/S
 
             # --- Clustering (stage-wise): cluster into K clusters ---
-            k_actual = min(K, S)  # can't have more clusters than samples
+            k_actual = min(K, S_joint)  # can't have more clusters than samples
             kmeans = KMeans(n_clusters=k_actual, random_state=42, n_init="auto")
             labels = kmeans.fit_predict(samples)
             centroids = kmeans.cluster_centers_
@@ -473,7 +478,7 @@ def build_scenario_tree(state, L, K, S):
     def get_probabilities(leaves):
         probabilities = {}
         for i, node in enumerate(leaves):
-            probabilities[i+1] = node.scenario_probability()
+            probabilities[i+1] = node.scenario_probability()    # {1: prob1, 2: prob2, 3: prob3, ....}
         return probabilities
     
     # --- Build forecast dictionaries by walking each scenario's path from root ---
@@ -549,23 +554,23 @@ def solve_model(m):
 
 def select_action(state):
     params = get_fixed_data()
-    K = int(params['num_timeslots']) # Simulation time horizon from SystemCharacteristics
+    K = params['num_timeslots'] # Simulation time horizon from SystemCharacteristics
     R = [1,2] # Set of rooms
 
     # 1. Specify the Lookahead Horizon Length
     L = 4   # Lookahead horizon length
-    B = 3   # Branching factor
-    S = 100  # Sampling factor
+    B = 4   # Branching factor
+    S = 10  # Sampling factor (number of individual samples PER uncertain variable)
 
     # 2. Specify the structure of the scenario tree
-    L = min(L, K - state["current_time"] + 1)   # Update lookahead horizon length for the current timeslot
-    L_set = list(range(state["current_time"], state["current_time"] + L - 1 + 1))  # Lookahead Horizon (e.g. {1, 2, 3, 4})
-    # print("L =", L_set)
-    # print(f"Lookahead time horizon length is {L}.")
+    L = min(L, K - state["current_time"])   # Update lookahead horizon length for the current timeslot
+    L_set = list(range(state["current_time"], state["current_time"] + L))  # Lookahead Horizon (e.g. {0, 1, 2, 3})
+    #print("L =", L_set)
+    #print(f"Lookahead time horizon length is {L}.")
     
     OMEGA = pow(B,L-1)  # Number of scenarios generated
-    OMEGA_set = list(range(1, OMEGA+1)) # Set of scenarios
-    # print("There are", OMEGA, "scenarios generated in total.")
+    OMEGA_set = list(range(1, OMEGA + 1)) # Set of scenarios
+    #print("There are", OMEGA, "scenarios generated in total.")
 
     # 3. Create scenarios and probabilities
     root, leaves, probabilities, (price, occ) = build_scenario_tree(state, L, B, S)
@@ -647,5 +652,5 @@ state = {
     "vent_counter": 0, #For how many consecutive hours has the ventilation been on 
     "low_override_r1": 0, #Is the low-temperature overrule controller of room 1 active 
     "low_override_r2": 0, #Is the low-temperature overrule controller of room 2 active 
-    "current_time": 1 #What is the hour of the day
+    "current_time": 0 #What is the hour of the day
 }

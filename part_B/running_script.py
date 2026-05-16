@@ -7,10 +7,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
-from part_A.SystemCharacteristics import get_fixed_data
+from data.v2_SystemCharacteristics import get_fixed_data          # v2
 # from part_B.policies.SP_policy_18 import select_action
-from part_B.policies.ADP_policy_18 import select_action
-from part_B.RestaurantEnv import step_env, reset_env
+from part_B.policies.ADP_policy_new_features_18 import select_action
+from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv
 from part_B.dummy_policy import dummy_action, DUMMY_ACTION
 
 
@@ -51,14 +51,13 @@ def get_action(policy_fn, state, timeout=15):
     return action
 
 
-# Data loading
-
-price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+# ── Data loading ───────────────────────────────────────────────────────────
+price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
 occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
 occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
 base_data  = get_fixed_data()
-price_data = load_all_days(price_path)
+price_data = load_all_days(price_path)   # 100 rows × 11 cols
 occ1_data  = load_all_days(occ1_path)
 occ2_data  = load_all_days(occ2_path)
 
@@ -70,7 +69,12 @@ for day in range(num_days):
     print(f"\nDay {day + 1}")
 
     data = copy.deepcopy(base_data)
-    data['price'] = price_data[day]
+
+    # v2_PriceData layout:
+    #   col 0      → price at t = -1  (previous price for the initial state)
+    #   cols 1-10  → hourly prices for t = 0 .. 9
+    data["price_previous"] = price_data[day][0]   # feeds into reset_env
+    data["price"]          = price_data[day][1:]  # 10 hourly prices for step_env
 
     occupancy = {
         "Room1": occ1_data[day],
@@ -83,6 +87,7 @@ for day in range(num_days):
 
     while not done:
         action            = get_action(select_action, state)
+        print(action)
         state, cost, done = step_env(state, action, data, occupancy)
         total_cost       += cost
 

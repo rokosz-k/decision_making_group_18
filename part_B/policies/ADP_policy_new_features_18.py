@@ -48,14 +48,14 @@ for _p in [_BASE_DIR, _PART_B_DIR]:
 # ─────────────────────────────────────────────
 # Load trained weights
 # ─────────────────────────────────────────────
-_ETA_PATH = os.path.join(_PART_B_DIR, "ADP_training", "eta_fvi.pkl")
+_ETA_PATH = os.path.join(_PART_B_DIR, "ADP_training", "eta_sp_fvi.pkl")
 with open(_ETA_PATH, "rb") as _f:
     ETA = pickle.load(_f)
 
 # ─────────────────────────────────────────────
 # Project imports
 # ─────────────────────────────────────────────
-from part_A.SystemCharacteristics import get_fixed_data
+from data.v2_SystemCharacteristics import get_fixed_data
 from part_B.PriceProcessRestaurant import price_model
 from part_B.OccupancyProcessRestaurant import next_occupancy_levels
 

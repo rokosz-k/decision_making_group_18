@@ -1,5 +1,5 @@
 """
-collect_samples.py
+collect_samples.py  (v2)
 
 Runs a policy over all available days and saves, for each (day, hour):
   - all state variables
@@ -22,12 +22,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(BASE_DIR)
 
-from part_A.SystemCharacteristics import get_fixed_data
-from part_B.RestaurantEnv import step_env, reset_env
+from data.v2_SystemCharacteristics import get_fixed_data            # v2
+from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv
 
 
 # ─────────────────────────────────────────────
-# Helpers (same as running_script)
+# Helpers
 # ─────────────────────────────────────────────
 
 def load_all_days(path):
@@ -78,13 +78,13 @@ def collect_samples(policy_fn, output_path="samples.csv"):
     Saves results to output_path as a CSV.
     """
 
-    # ── Data loading ──
-    price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+    # ── Data loading ──────────────────────────────────────────────────────
+    price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")  # v2: 11 cols
     occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
     occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
     base_data  = get_fixed_data()
-    price_data = load_all_days(price_path)
+    price_data = load_all_days(price_path)   # 100 rows × 11 cols
     occ1_data  = load_all_days(occ1_path)
     occ2_data  = load_all_days(occ2_path)
 
@@ -95,25 +95,29 @@ def collect_samples(policy_fn, output_path="samples.csv"):
         print(f"Day {day + 1}/{num_days}")
 
         data = copy.deepcopy(base_data)
-        data["price"] = price_data[day]
+
+        # v2_PriceData layout:
+        #   col 0      → price at t = -1  (previous price for the initial state)
+        #   cols 1-10  → hourly prices for t = 0 .. 9
+        data["price_previous"] = price_data[day][0]   # feeds into reset_env
+        data["price"]          = price_data[day][1:]  # 10 hourly prices for step_env
 
         occupancy = {
             "Room1": occ1_data[day],
             "Room2": occ2_data[day],
         }
 
-        state = reset_env(data, occupancy)
+        state = reset_env(data, occupancy)   # uses updated v2-compatible reset_env
         done  = False
 
         # ── Collect (state, cost) pairs for one day ──
-        day_states = []   # state snapshot BEFORE action
-        day_costs  = []   # cost incurred AT that hour
+        day_states = []
+        day_costs  = []
 
         while not done:
-            # Save state snapshot before action
             day_states.append(dict(state))
 
-            action          = get_action(policy_fn, state)
+            action            = get_action(policy_fn, state)
             state, cost, done = step_env(state, action, data, occupancy)
 
             day_costs.append(cost)
@@ -132,7 +136,6 @@ def collect_samples(policy_fn, output_path="samples.csv"):
                 "day":              day,
                 "hour":             t,
                 "cost_to_go":       ctg,
-                # all state variables
                 "T1":               s["T1"],
                 "T2":               s["T2"],
                 "H":                s["H"],
@@ -160,13 +163,13 @@ def collect_samples(policy_fn, output_path="samples.csv"):
 # ─────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────
-# To use a different policy, replace dummy_policy below with your import, e.g.:
+# To use a different policy, replace the import below, e.g.:
 #   from part_B.policies.ADP_policy_18 import select_action as policy_fn
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     from part_B.policies.ADP_policy_new_features_18 import select_action as policy_fn
-    # policy_fn   = dummy_policy   # if you want to use dummy policy 
-    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_adp_new_features.csv") # swap output name here       
+    # policy_fn = dummy_policy   # if you want to use dummy policy
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_fvi.csv")
 
     collect_samples(policy_fn, output_path)

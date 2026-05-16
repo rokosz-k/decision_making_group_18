@@ -48,7 +48,7 @@ for _p in [_BASE_DIR, _PART_B_DIR]:
 # ─────────────────────────────────────────────
 # Load trained weights
 # ─────────────────────────────────────────────
-_ETA_PATH = os.path.join(_PART_B_DIR, "ADP_training", "eta_sp_fvi.pkl")
+_ETA_PATH = os.path.join(_PART_B_DIR, "ADP_training", "eta_sp_fvi_v2.pkl")
 with open(_ETA_PATH, "rb") as _f:
     ETA = pickle.load(_f)
 

@@ -316,8 +316,8 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
 
 if __name__ == "__main__":
     samples_path = (sys.argv[1] if len(sys.argv) > 1
-                    else os.path.join(SCRIPT_DIR, "samples/samples_sp_fvi.csv"))
+                    else os.path.join(SCRIPT_DIR, "samples/samples_sp_fvi_v2.csv"))
     ridge_lambda = float(sys.argv[2]) if len(sys.argv) > 2 else RIDGE_LAMBDA
-    output_path  = os.path.join(SCRIPT_DIR, "eta_sp_fvi.pkl")
+    output_path  = os.path.join(SCRIPT_DIR, "eta_sp_fvi_v2.pkl")
 
     train(samples_path, output_path, ridge_lambda)

@@ -170,6 +170,6 @@ def collect_samples(policy_fn, output_path="samples.csv"):
 if __name__ == "__main__":
     from part_B.policies.ADP_policy_new_features_18 import select_action as policy_fn
     # policy_fn = dummy_policy   # if you want to use dummy policy
-    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_fvi.csv")
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples_fvi_v4.csv")
 
     collect_samples(policy_fn, output_path)

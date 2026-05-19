@@ -270,7 +270,7 @@ for day in range(num_days):
     if res is not None:
         daily_costs.append(res['cost'])
         results_per_day.append(res)
-        print(f"cost = {res['cost']:.4f} €")
+        print(f"cost = {res['cost']:.4f}")
     else:
         results_per_day.append(None)
         print("FAILED")
@@ -281,10 +281,10 @@ for day in range(num_days):
 solved_costs = [c for c in daily_costs]
 print(f"\n{'='*45}")
 print(f"  Days solved:          {len(solved_costs)} / {num_days}")
-print(f"  Average daily cost:   {np.mean(solved_costs):.4f} €")
-print(f"  Std deviation:        {np.std(solved_costs):.4f} €")
-print(f"  Min daily cost:       {np.min(solved_costs):.4f} €")
-print(f"  Max daily cost:       {np.max(solved_costs):.4f} €")
+print(f"  Average daily cost:   {np.mean(solved_costs):.4f}")
+print(f"  Std deviation:        {np.std(solved_costs):.4f}")
+print(f"  Min daily cost:       {np.min(solved_costs):.4f}")
+print(f"  Max daily cost:       {np.max(solved_costs):.4f}")
 print(f"{'='*45}\n")
 
 

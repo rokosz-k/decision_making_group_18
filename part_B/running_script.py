@@ -9,8 +9,8 @@ sys.path.append(BASE_DIR)
 
 from data.v2_SystemCharacteristics import get_fixed_data          # v2
 # from part_B.policies.SP_policy_18 import select_action
-# from part_B.policies.ADP_policy_new_features_18 import select_action
-from part_B.policies.hybrid_policy_18 import select_action
+from part_B.policies.ADP_policy_new_features_18 import select_action
+# from part_B.policies.hybrid_policy_18 import select_action
 from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv
 from part_B.dummy_policy import dummy_action, DUMMY_ACTION
 

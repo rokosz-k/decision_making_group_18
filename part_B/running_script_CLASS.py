@@ -8,7 +8,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
 from data.v2_SystemCharacteristics import get_fixed_data          # v2
-from part_B.policies.CLASS_SP_policy_18 import SP_Policy
+from part_B.policies.using_class.CLASS_SP_policy_18 import SP_Policy
 # from part_B.policies.CLASS_ADP_policy_new_features_18 import ADP_Policy
 # from part_B.policies.CLASS_hybrid_policy_18 import Hybrid_Policy
 from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv

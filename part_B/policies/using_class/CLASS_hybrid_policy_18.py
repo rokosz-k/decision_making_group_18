@@ -33,7 +33,7 @@ for _p in [_BASE_DIR, _PART_B_DIR]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Imports
 # ─────────────────────────────────────────────────────────────────────────────
-from part_B.policies.CLASS_ADP_policy_new_features_18 import ADP_Policy
+from part_B.policies.using_class.CLASS_ADP_policy_new_features_18 import ADP_Policy
 
 DUMMY_ACTION = {"HeatPowerRoom1": 0.0, "HeatPowerRoom2": 0.0, "VentilationON": 0}
 

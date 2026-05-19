@@ -91,7 +91,7 @@ class MyPolicy:
     def select_action(self, state):
         return {"HeatPowerRoom1": 50, "HeatPowerRoom2": -330, "VentilationON": 'something_crazy'}
 
-from part_B.policies.CLASS_ADP_policy_new_features_18 import ADP_Policy
+from part_B.policies.using_class.CLASS_ADP_policy_new_features_18 import ADP_Policy
 
 policy = ADP_Policy()
 

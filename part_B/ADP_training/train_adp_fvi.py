@@ -66,7 +66,7 @@ from part_B.RestaurantEnv import step_env
 T_END        = 10     # hourly timesteps per day
 N            = 300    # sampled states per timestep (from samples CSV)
 K            = 20     # future scenarios per state (Monte Carlo expectation)
-I_ITER       = 10     # FVI iterations
+I_ITER       = 20     # FVI iterations
 RIDGE_LAMBDA = 10.0   # same as train_adp_new_features.py for fair comparison
 SEED         = 42
 
@@ -316,8 +316,8 @@ def train(samples_path, output_path, ridge_lambda=RIDGE_LAMBDA):
 
 if __name__ == "__main__":
     samples_path = (sys.argv[1] if len(sys.argv) > 1
-                    else os.path.join(SCRIPT_DIR, "samples/samples_sp_fvi_v2.csv"))
+                    else os.path.join(SCRIPT_DIR, "samples/samples_sp_fvi_v3.csv"))
     ridge_lambda = float(sys.argv[2]) if len(sys.argv) > 2 else RIDGE_LAMBDA
-    output_path  = os.path.join(SCRIPT_DIR, "eta_sp_fvi_v2.pkl")
+    output_path  = os.path.join(SCRIPT_DIR, "eta_sp_fvi_v3.pkl")
 
     train(samples_path, output_path, ridge_lambda)

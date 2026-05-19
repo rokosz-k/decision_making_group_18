@@ -61,6 +61,29 @@ def step_env(state, action, data, occupancy):
     Occ1 = occupancy["Room1"][t]
     Occ2 = occupancy["Room2"][t]
 
+    # check if overrules are active and adjust actions accordingly
+    # -----------------------------
+    # Enforce max heating during low override
+    # -----------------------------
+    if low_r1 == 1:
+        P1 = data['heating_max_power']
+    if low_r2 == 1:
+        P2 = data['heating_max_power']
+
+    # -----------------------------
+    # High temperature cutoff
+    # -----------------------------
+    T_high = data['temp_max_comfort_threshold']
+    if T1 > T_high:
+        P1 = 0
+    if T2 > T_high:
+        P2 = 0
+    # After calculating H_new, but before cost calculation:
+    if H > data['humidity_threshold']:
+        vent_on = 1
+
+
+
     # -----------------------------
     # Action overrides — resolve before dynamics
     # -----------------------------
@@ -127,6 +150,8 @@ def step_env(state, action, data, occupancy):
     # Humidity dynamics
     # -----------------------------
     H_new = H + data['humidity_occupancy_coeff'] * (Occ1 + Occ2) - data['humidity_vent_coeff'] * vent_on
+
+
 
     # -----------------------------
     # Low-temperature overrule controller — update flags for next step

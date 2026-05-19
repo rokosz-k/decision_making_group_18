@@ -1,8 +1,12 @@
 # ------------------------------
 # Imports
 # ------------------------------
+import os
+import sys
 import pandas as pd
-from SystemCharacteristics import get_fixed_data
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from part_A.SystemCharacteristics import get_fixed_data
 from RestaurantEnv import reset_env, step_env   
 
 
@@ -16,9 +20,10 @@ def load_first_day(path):
 # ------------------------------
 # File paths
 # ------------------------------
-price_path = '/Users/jaredbutler/Desktop/Masters/Winter 2026/2) Decision Making/Assignment/Part B/PriceData.csv'
-occ1_path  = '/Users/jaredbutler/Desktop/Masters/Winter 2026/2) Decision Making/Assignment/Part B/OccupancyRoom1.csv'
-occ2_path  = '/Users/jaredbutler/Desktop/Masters/Winter 2026/2) Decision Making/Assignment/Part B/OccupancyRoom2.csv'
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
+occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
 
 # ------------------------------

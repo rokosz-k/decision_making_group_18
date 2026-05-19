@@ -13,6 +13,11 @@ Created on Thu Nov 20 11:08:56 2025
 
 import time
 import numpy as np
+import os
+import sys
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+
 
 # ------------------------------------------------------------
 # Dummy safe action
@@ -86,9 +91,24 @@ class MyPolicy:
     def select_action(self, state):
         return {"HeatPowerRoom1": 50, "HeatPowerRoom2": -330, "VentilationON": 'something_crazy'}
 
-policy = MyPolicy()
+from part_B.policies.CLASS_ADP_policy_new_features_18 import ADP_Policy
 
-state = {"T1": 21} #replace with a proper state dictionary
+policy = ADP_Policy()
+
+# state = {"T1": 21} #replace with a proper state dictionary
+state = {
+    "T1": 20, #Temperature of room 1
+    "T2": 20, #Temperature of room 2
+    "H": 80, #Humidity
+    "Occ1": 34.098941577065816, #Occupancy of room 1
+    "Occ2": 19.416994739003783, #Occupancy of room 2
+    "price_t": 4.311188506349689, #Price
+    "price_previous": 5.831303587171684, #Previous Price
+    "vent_counter": 0, #For how many consecutive hours has the ventilation been on 
+    "low_override_r1": 0, #Is the low-temperature overrule controller of room 1 active 
+    "low_override_r2": 0, #Is the low-temperature overrule controller of room 2 active 
+    "current_time": 0 #What is the hour of the day
+}
 PowerMax = {1: 3.0, 2: 3.0}
 
 action = check_and_sanitize_action(policy, state, PowerMax)

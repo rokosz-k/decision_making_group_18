@@ -19,7 +19,7 @@ from data.v2_SystemCharacteristics import get_fixed_data
 from part_A.PlotsRestaurant import plot_HVAC_results
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
 occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
 occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
@@ -29,7 +29,7 @@ num_timeslots = data['num_timeslots']
 T_slots = list(range(num_timeslots))
 rooms = [0, 1]
 
-price_df = pd.read_csv(price_path, header=0)
+price_df = pd.read_csv(price_path, header=0, usecols=range(1, 11))  # ignore first column that is price previous
 occ1_df  = pd.read_csv(occ1_path,  header=0)
 occ2_df  = pd.read_csv(occ2_path,  header=0)
 

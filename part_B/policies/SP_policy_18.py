@@ -1,8 +1,9 @@
 import sys
 import os
-import itertools
+import time
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import pyomo.environ as pyo
 from sklearn.cluster import KMeans
 from pyomo.environ import (
@@ -14,6 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from data.v2_SystemCharacteristics import get_fixed_data
 from part_B.PriceProcessRestaurant import price_model
 from part_B.OccupancyProcessRestaurant import next_occupancy_levels
+from part_B.utils.plot_scenario_tree import plot_scenario_tree
 
 # The state will be provided by the environment as the following dictionary
 
@@ -104,7 +106,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.T_high   = Param(initialize=sys_characteristics["temp_max_comfort_threshold"])
     m.H_high   = Param(initialize=sys_characteristics["humidity_threshold"])
     m.U_vent   = Param(initialize=sys_characteristics["vent_min_up_time"], within=pyo.NonNegativeIntegers)
-    m.M_temp   = Param(initialize=1e3) # We can lower big-Ms
+    m.M_temp   = Param(initialize=1e3)
     m.M_hum    = Param(initialize=1e3)
 
     m.zeta_exch = Param(initialize=sys_characteristics["heat_exchange_coeff"])
@@ -153,14 +155,8 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     )
 
     # ------------------------------------------------------------------
-    # Helper: get T or H at t-1, using initial condition at tau
+    # Helper: get value of v_prev (t = tau or t > tau)
     # ------------------------------------------------------------------
-    #def T_prev(om, r, t): # DELETE
-    #    return m.T_init[r] if t == tau else m.T[om, r, t - 1]
-
-    #def H_prev(om, t): # DELETE
-    #    return m.H_init if t == tau else m.H[om, t - 1]
-
     def v_prev_val(om, t):
         return value(m.v_prev) if t == tau else m.v[om, t - 1]
 
@@ -198,8 +194,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     def hum_dynamics_rule(m, om, t):
         return m.H[om, t] == (
-            #H_prev(om, t)  # old
-            m.H[om, t - 1]  # new
+            m.H[om, t - 1]
             + m.eta_occ  * sum(m.occ[om, r, t - 1] for r in m.R)
             - m.eta_vent * v_prev_val(om, t)
         )
@@ -253,22 +248,22 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     # Overrule Controller — Activation
     # ------------------------------------------------------------------
-    # (12): u >= y_low, for all t
+    # u >= y_low, for all t
     def overrule_on_rule(m, om, r, t):
         return m.u[om, r, t] >= m.y_low[om, r, t]
     m.overrule_on = Constraint(m.Omega, m.R, m.L, rule=overrule_on_rule)
 
-    # (13): u <= u_prev + y_low, for t > tau
+    # u <= u_prev + y_low, for t > tau
     def overrule_persist_rule(m, om, r, t):
         return m.u[om, r, t] <= m.u[om, r, t - 1] + m.y_low[om, r, t]
     m.overrule_persist = Constraint(m.Omega, m.R, m.L_not_tau, rule=overrule_persist_rule)
 
-    # (13 init): u_tau <= u_init + y_low_tau
+    # u_tau <= u_init + y_low_tau
     def overrule_persist_init_rule(m, om, r):
         return m.u[om, r, tau] <= m.u_init[r] + m.y_low[om, r, tau]
     m.overrule_persist_init = Constraint(m.Omega, m.R, rule=overrule_persist_init_rule)
 
-    # (14): p >= P_bar * u
+    # p >= P_bar * u
     def heater_max_rule(m, om, r, t):
         return m.p[om, r, t] >= m.P_bar[r] * m.u[om, r, t]
     m.heater_max = Constraint(m.Omega, m.R, m.L, rule=heater_max_rule)
@@ -276,17 +271,17 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     # Overrule Controller — Deactivation
     # ------------------------------------------------------------------
-    # (15): u >= u_prev - y_ok, for t > tau
+    # u >= u_prev - y_ok, for t > tau
     def overrule_off_lb_rule(m, om, r, t):
         return m.u[om, r, t] >= m.u[om, r, t - 1] - m.y_ok[om, r, t]
     m.overrule_off_lb = Constraint(m.Omega, m.R, m.L_not_tau, rule=overrule_off_lb_rule)
 
-    # (15 init): u_tau >= u_init - y_ok_tau
+    # u_tau >= u_init - y_ok_tau
     def overrule_off_lb_init_rule(m, om, r):
         return m.u[om, r, tau] >= m.u_init[r] - m.y_ok[om, r, tau]
     m.overrule_off_lb_init = Constraint(m.Omega, m.R, rule=overrule_off_lb_init_rule)
 
-    # (16): u <= 1 - y_ok, for all t
+    # u <= 1 - y_ok, for all t
     def overrule_off_ub_rule(m, om, r, t):
         return m.u[om, r, t] <= 1 - m.y_ok[om, r, t]
     m.overrule_off_ub = Constraint(m.Omega, m.R, m.L, rule=overrule_off_ub_rule)
@@ -294,33 +289,33 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     # ------------------------------------------------------------------
     # Ventilation Startup
     # ------------------------------------------------------------------
-    # (17): s >= v - v_prev, for t > tau
+    # s >= v - v_prev, for t > tau
     def startup1_rule(m, om, t):
         return m.s[om, t] >= m.v[om, t] - m.v[om, t - 1]
     m.startup1 = Constraint(m.Omega, m.L_not_tau, rule=startup1_rule)
 
-    # (17 init): s_tau >= v_tau - v_prev
+    # s_tau >= v_tau - v_prev
     def startup1_init_rule(m, om):
         return m.s[om, tau] >= m.v[om, tau] - m.v_prev
     m.startup1_init = Constraint(m.Omega, rule=startup1_init_rule)
 
-    # (18): s <= v, for all t
+    # s <= v, for all t
     def startup2_rule(m, om, t):
         return m.s[om, t] <= m.v[om, t]
     m.startup2 = Constraint(m.Omega, m.L, rule=startup2_rule)
 
-    # (19): s <= 1 - v_prev, for t > tau
+    # s <= 1 - v_prev, for t > tau
     def startup3_rule(m, om, t):
         return m.s[om, t] <= 1 - m.v[om, t - 1]
     m.startup3 = Constraint(m.Omega, m.L_not_tau, rule=startup3_rule)
 
-    # (19 init): s_tau <= 1 - v_prev
+    # s_tau <= 1 - v_prev
     def startup3_init_rule(m, om):
         return m.s[om, tau] <= 1 - m.v_prev
     m.startup3_init = Constraint(m.Omega, rule=startup3_init_rule)
 
     # ------------------------------------------------------------------
-    # Minimum Up-Time — startups within horizon  (20)
+    # Minimum Up-Time — startups within horizon
     # ------------------------------------------------------------------
     horizon_end = tau + len(L) - 1   # last time slot index
 
@@ -334,7 +329,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
     m.min_uptime = Constraint(m.Omega, m.L, rule=min_uptime_rule)
 
     # ------------------------------------------------------------------
-    # Minimum Up-Time — carry-over from before horizon  (20 init)
+    # Minimum Up-Time — carry-over from before horizon
     # ------------------------------------------------------------------
     remaining = max(value(m.U_vent) - value(m.c0), 0)
     remaining = min(remaining, len(L))   # clip to horizon length
@@ -350,7 +345,7 @@ def build_model(data: dict, state: dict) -> ConcreteModel:
         m.min_uptime_init = Constraint(m.Omega, rule=min_uptime_init_rule)
 
     # ------------------------------------------------------------------
-    # Humidity-Triggered Ventilation  (21)
+    # Humidity-Triggered Ventilation
     # ------------------------------------------------------------------
     def hum_vent_rule(m, om, t):
         return m.H[om, t] <= m.H_high + m.M_hum * m.v[om, t]
@@ -395,20 +390,16 @@ def sample(price_t, price_previous, r1_current, r2_current, S):
         price_previous (float): Previous price (at t-1).
         r1_current (float): Current occupancy in room 1.
         r2_current (float): Current occupancy in room 2.
-        S (int): Sampling factor (number of individual samples per uncertain variable).
+        S (int): Sampling factor
     Returns:
         numpy.ndarray: (S, 3) stack, where each row is one [price, occ1, occ2] joint realization.
     """
-    # Sample S values for each variable independently
-    sampled_price = [price_model(price_t, price_previous) for _ in range(S)]
-    sampled_occ = [next_occupancy_levels(r1_current, r2_current) for _ in range(S)]
-    sampled_occ1 = [o[0] for o in sampled_occ]
-    sampled_occ2 = [o[1] for o in sampled_occ]
-
-    # Create all S^3 joint combinations via cartesian product
-    combinations = list(itertools.product(sampled_price, sampled_occ1, sampled_occ2))
-
-    return np.array(combinations)  # shape: (S^3, 3)
+    # Joint sampling
+    samples = np.array([
+        [price_model(price_t, price_previous), *next_occupancy_levels(r1_current, r2_current)]
+        for _ in range(S)
+    ])
+    return samples
 
 def build_scenario_tree(state, L, K, S):
     """
@@ -536,21 +527,26 @@ def build_OMEGA_tw(state, leaves, OMEGA, OMEGA_set, L_set):
             #print(f"For t={t} s={s}, {len(end_scenarios)} scenarios share this node in their path (excluding s).")  
     return OMEGA_tw
 
-def solve_model(m):
+def solve_model(m, start_time):
     """Build and solve the model using Gurobi."""
     solver = pyo.SolverFactory("gurobi")
-    solver.options["MIPGap"]   = 1e-4
-    #solver.options["TimeLimit"] = 300     # seconds (=5 mins)
+    solver.options["TimeLimit"] = 15
     solver.options["OutputFlag"] = False
 
-    results = solver.solve(m, tee=False)
+    results = solver.solve(m, tee=False, load_solutions=False)
 
-    if results.solver.termination_condition == pyo.TerminationCondition.optimal:
-        print(f"Optimal cost: {value(m.obj):.4f}")
-    else:
-        print(f"Solver status: {results.solver.termination_condition}")
+    if time.time() - start_time > 15: # Time limit hit (with or without feasible solution) → raise → [ERROR] in get_action → dummy action.
+        #print("  [TIMEOUT]")
+        raise RuntimeError(f"Time limit exceeded")
 
-    return m, results
+    tc = results.solver.termination_condition
+    if tc == pyo.TerminationCondition.optimal: # Only accept fully optimal solution within the timelimit
+        m.solutions.load_from(results)
+        #print(f"Optimal cost: {value(m.obj):.4f}")
+        return m, results  
+    else:   #  Infeasible/error → raise → [ERROR] in get_action → dummy action.
+        #print("  [INFEASIBLE/ERROR]")
+        raise RuntimeError(f"Gurobi did not solve optimally: {tc}")
 
 def select_action(state):
     params = get_fixed_data()
@@ -558,9 +554,9 @@ def select_action(state):
     R = [1,2] # Set of rooms
 
     # 1. Specify the Lookahead Horizon Length
-    L = 4   # Lookahead horizon length
-    B = 4   # Branching factor
-    S = 10  # Sampling factor (number of individual samples PER uncertain variable)
+    L = 5   # Lookahead horizon length
+    B = 2   # Branching factor
+    S = 10  # Sampling factor
 
     # 2. Specify the structure of the scenario tree
     L = min(L, K - state["current_time"])   # Update lookahead horizon length for the current timeslot
@@ -574,6 +570,10 @@ def select_action(state):
 
     # 3. Create scenarios and probabilities
     root, leaves, probabilities, (price, occ) = build_scenario_tree(state, L, B, S)
+
+    # optional: Plot scenario tree
+    # fig, ax = plot_scenario_tree(root)
+    # plt.show()
 
     # Sanity check
     total_prob = sum(probabilities.values())
@@ -594,8 +594,10 @@ def select_action(state):
     }
     
     # --- Build and solve the optimization model ---
+    start_time = time.time() # NEW
     m = build_model(data, state)
-    m, results = solve_model(m)
+    m, results = solve_model(m, start_time)
+    #print("solve_model returned successfully")
     #print(results)
 
     # --- Results DataFrame ---
@@ -640,7 +642,7 @@ def select_action(state):
     return HereAndNowActions
 
 
-# Example use (to be deleted)
+# Example state
 state = {
     "T1": 21, #Temperature of room 1
     "T2": 21, #Temperature of room 2

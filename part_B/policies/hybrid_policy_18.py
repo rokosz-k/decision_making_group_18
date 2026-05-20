@@ -27,7 +27,7 @@ for _p in [_BASE_DIR, _PART_B_DIR]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Import internals from ADP policy
 # ─────────────────────────────────────────────────────────────────────────────
-from part_B.policies.ADP_policy_14_features_18 import (
+from part_B.policies.ADP_policy_9_features_18 import (
     ETA,
     _get_data,
     _sample_scenarios,

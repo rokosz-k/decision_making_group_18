@@ -2,17 +2,13 @@ import os
 import sys
 import copy
 import pandas as pd
+import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
-from data.v2_SystemCharacteristics import get_fixed_data          # v2
-# from part_B.policies.SP_policy_18 import select_action
-from part_B.policies.ADP_policy_9_features_18 import select_action
-# from part_B.policies.ADP_policy_14_features_18 import select_action
-# from part_B.policies.hybrid_policy_18 import select_action
-# from part_B.policies.hybrid_policy_18_v2 import select_action
+from data.v2_SystemCharacteristics import get_fixed_data            # v2
 from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv
 from part_B.dummy_policy import dummy_action, DUMMY_ACTION
 
@@ -54,73 +50,87 @@ def get_action(policy_fn, state, timeout=15):
     return action
 
 
-# ── Data loading ───────────────────────────────────────────────────────────
-price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
-occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
-occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
+def run_script(select_action):
+    # ── Data loading ───────────────────────────────────────────────────────────
+    price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
+    occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
+    occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
-import matplotlib.pyplot as plt
-import seaborn as sns
+    base_data  = get_fixed_data()
+    price_data = load_all_days(price_path)   # 100 rows × 11 cols
+    occ1_data  = load_all_days(occ1_path)
+    occ2_data  = load_all_days(occ2_path)
 
-base_data  = get_fixed_data()
-price_data = load_all_days(price_path)   # 100 rows × 11 cols
-occ1_data  = load_all_days(occ1_path)
-occ2_data  = load_all_days(occ2_path)
+    num_days    = 100
+    total_costs = []
 
-num_days    = 100
-total_costs = []
+    # price_days = []
+    # for day in range(num_days):
+    #     price_day = sum(price_data[day][1:])/10
+    #     price_days.append(price_day)
 
-# price_days = []
-# for day in range(num_days):
-#     price_day = sum(price_data[day][1:])/10
-#     price_days.append(price_day)
+    # import seaborn as sns
+    # sns.histplot(price_days, bins=20, kde=True, color='skyblue', edgecolor='black')
+    # plt.xlabel('Price [DKK]')
+    # plt.ylabel('Frequency')
+    # plt.title('Average Daily Price')
+    # plt.show()
 
+    for day in range(num_days):
+        print(f"\nDay {day + 1}")
 
-# sns.histplot(price_days, bins=20, kde=True, color='skyblue', edgecolor='black')
-# plt.xlabel('Price [DKK]')
-# plt.ylabel('Frequency')
-# plt.title('Average Daily Price')
-# plt.show()
+        data = copy.deepcopy(base_data)
 
-for day in range(num_days):
-    print(f"\nDay {day + 1}")
+        # v2_PriceData layout:
+        #   col 0      → price at t = -1  (previous price for the initial state)
+        #   cols 1-10  → hourly prices for t = 0 .. 9
+        data["price_previous"] = price_data[day][0]   # feeds into reset_env
+        data["price"]          = price_data[day][1:]  # 10 hourly prices for step_env
 
-    data = copy.deepcopy(base_data)
+        occupancy = {
+            "Room1": occ1_data[day],
+            "Room2": occ2_data[day]
+        }
 
-    # v2_PriceData layout:
-    #   col 0      → price at t = -1  (previous price for the initial state)
-    #   cols 1-10  → hourly prices for t = 0 .. 9
-    data["price_previous"] = price_data[day][0]   # feeds into reset_env
-    data["price"]          = price_data[day][1:]  # 10 hourly prices for step_env
+        state      = reset_env(data, occupancy)
+        done       = False
+        total_cost = 0.0
 
-    occupancy = {
-        "Room1": occ1_data[day],
-        "Room2": occ2_data[day]
-    }
+        while not done:
+            action            = get_action(select_action, state)
+            #print(action)
+            state, cost, done = step_env(state, action, data, occupancy)
+            total_cost       += cost
 
-    state      = reset_env(data, occupancy)
-    done       = False
-    total_cost = 0.0
+        total_costs.append(total_cost)
+        print(f"\nTotal cost: {total_cost:.4f}")
 
-    while not done:
-        action            = get_action(select_action, state)
-        print(action)
-        state, cost, done = step_env(state, action, data, occupancy)
-        total_cost       += cost
+    print("\n", "=" * 30, "SUMMARY", "=" * 30)
+    print(f"Average cost : {sum(total_costs) / len(total_costs):.4f}")
+    print(f"Min cost     : {min(total_costs):.4f}")
+    print(f"Max cost     : {max(total_costs):.4f}")
 
-    total_costs.append(total_cost)
-    print(f"\nTotal cost: {total_cost:.4f}")
+    # Plot histogram
+    # plt.figure(figsize=(10, 5))
+    # plt.hist(total_costs, bins=20, edgecolor='black')
+    # plt.axvline(sum(total_costs)/len(total_costs), color='red', linestyle='--', 
+    #             linewidth=1.5, label=f'Mean: {sum(total_costs)/len(total_costs):.4f}')
+    # plt.xlabel('Daily Cost')
+    # plt.ylabel('Frequency')
+    # plt.title('Distribution of Daily Costs over 100 Days - Dummy')
+    # plt.legend()
+    # plt.grid(True, alpha=0.3)
+    # plt.tight_layout()
+    # plt.savefig('daily_cost_histogram_deterministic.png', dpi=150)
+    # plt.show()
 
-print("\n", "=" * 30, "SUMMARY", "=" * 30)
-print(f"Average cost : {sum(total_costs) / len(total_costs):.4f}")
-print(f"Min cost     : {min(total_costs):.4f}")
-print(f"Max cost     : {max(total_costs):.4f}")
+    return sum(total_costs) / len(total_costs)
 
-# import matplotlib.pyplot as plt
-# import seaborn as sns
+if __name__ == "__main__":
+    # from part_B.policies.SP_policy_18 import select_action
+    from part_B.policies.ADP_policy_9_features_18 import select_action
+    # from part_B.policies.ADP_policy_14_features_18 import select_action
+    # from part_B.policies.hybrid_policy_18 import select_action
+    # from part_B.policies.hybrid_policy_18_v2 import select_action
 
-# sns.histplot(total_costs, bins=20, kde=True, color='skyblue', edgecolor='black')
-# plt.xlabel('Cost [DKK]')
-# plt.ylabel('Frequency')
-# plt.title('Daily Cost Histogram ADP')
-# plt.show()
+    run_script(select_action)

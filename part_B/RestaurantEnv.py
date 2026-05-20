@@ -116,9 +116,11 @@ def step_env(state, action, data, occupancy):
     if vent_on == 1:
         vent_counter += 1
     else:  # vent_on == 0 requested
-        if 0 < vent_counter <= data['vent_min_up_time']:
+        if 0 < vent_counter < data['vent_min_up_time']:
             vent_on = 1          # override: cannot turn off yet
             vent_counter += 1
+        else:
+            vent_counter = 0 # reset counter
 
     # =========================================================
     # DYNAMICS

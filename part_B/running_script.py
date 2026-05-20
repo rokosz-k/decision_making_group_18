@@ -9,7 +9,10 @@ sys.path.append(BASE_DIR)
 
 from data.v2_SystemCharacteristics import get_fixed_data          # v2
 # from part_B.policies.SP_policy_18 import select_action
-from part_B.policies.ADP_policy_new_features_18 import select_action
+from part_B.policies.ADP_policy_9_features_18 import select_action
+# from part_B.policies.ADP_policy_14_features_18 import select_action
+# from part_B.policies.hybrid_policy_18 import select_action
+# from part_B.policies.hybrid_policy_18_v2 import select_action
 from part_B.RestaurantEnv import step_env, reset_env                # updated RestaurantEnv
 from part_B.dummy_policy import dummy_action, DUMMY_ACTION
 
@@ -56,14 +59,28 @@ price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
 occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
 occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 base_data  = get_fixed_data()
 price_data = load_all_days(price_path)   # 100 rows × 11 cols
 occ1_data  = load_all_days(occ1_path)
 occ2_data  = load_all_days(occ2_path)
 
-
 num_days    = 100
 total_costs = []
+
+# price_days = []
+# for day in range(num_days):
+#     price_day = sum(price_data[day][1:])/10
+#     price_days.append(price_day)
+
+
+# sns.histplot(price_days, bins=20, kde=True, color='skyblue', edgecolor='black')
+# plt.xlabel('Price [DKK]')
+# plt.ylabel('Frequency')
+# plt.title('Average Daily Price')
+# plt.show()
 
 for day in range(num_days):
     print(f"\nDay {day + 1}")
@@ -98,3 +115,12 @@ print("\n", "=" * 30, "SUMMARY", "=" * 30)
 print(f"Average cost : {sum(total_costs) / len(total_costs):.4f}")
 print(f"Min cost     : {min(total_costs):.4f}")
 print(f"Max cost     : {max(total_costs):.4f}")
+
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+
+# sns.histplot(total_costs, bins=20, kde=True, color='skyblue', edgecolor='black')
+# plt.xlabel('Cost [DKK]')
+# plt.ylabel('Frequency')
+# plt.title('Daily Cost Histogram ADP')
+# plt.show()

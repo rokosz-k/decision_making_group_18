@@ -19,7 +19,7 @@ from data.v2_SystemCharacteristics import get_fixed_data
 from part_A.PlotsRestaurant import plot_HVAC_results
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-price_path = os.path.join(BASE_DIR, "data", "PriceData.csv")
+price_path = os.path.join(BASE_DIR, "data", "v2_PriceData.csv")    # v2: 11 cols
 occ1_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom1.csv")
 occ2_path  = os.path.join(BASE_DIR, "data", "OccupancyRoom2.csv")
 
@@ -29,7 +29,7 @@ num_timeslots = data['num_timeslots']
 T_slots = list(range(num_timeslots))
 rooms = [0, 1]
 
-price_df = pd.read_csv(price_path, header=0)
+price_df = pd.read_csv(price_path, header=0, usecols=range(1, 11))  # ignore first column that is price previous
 occ1_df  = pd.read_csv(occ1_path,  header=0)
 occ2_df  = pd.read_csv(occ2_path,  header=0)
 
@@ -270,7 +270,7 @@ for day in range(num_days):
     if res is not None:
         daily_costs.append(res['cost'])
         results_per_day.append(res)
-        print(f"cost = {res['cost']:.4f} €")
+        print(f"cost = {res['cost']:.4f}")
     else:
         results_per_day.append(None)
         print("FAILED")
@@ -281,10 +281,10 @@ for day in range(num_days):
 solved_costs = [c for c in daily_costs]
 print(f"\n{'='*45}")
 print(f"  Days solved:          {len(solved_costs)} / {num_days}")
-print(f"  Average daily cost:   {np.mean(solved_costs):.4f} €")
-print(f"  Std deviation:        {np.std(solved_costs):.4f} €")
-print(f"  Min daily cost:       {np.min(solved_costs):.4f} €")
-print(f"  Max daily cost:       {np.max(solved_costs):.4f} €")
+print(f"  Average daily cost:   {np.mean(solved_costs):.4f}")
+print(f"  Std deviation:        {np.std(solved_costs):.4f}")
+print(f"  Min daily cost:       {np.min(solved_costs):.4f}")
+print(f"  Max daily cost:       {np.max(solved_costs):.4f}")
 print(f"{'='*45}\n")
 
 

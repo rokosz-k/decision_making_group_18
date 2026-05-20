@@ -16,7 +16,7 @@ sys.path.append(BASE_DIR)
 from data.v2_SystemCharacteristics import get_fixed_data   # adjust if using v2
 
 from part_B.RestaurantEnv import step_env, reset_env
-from part_B.policies.ADP_policy_new_features_18 import select_action
+from part_B.policies.ADP_policy_9_features_18 import select_action
 
 def load_all_days(path):
     return pd.read_csv(path).values.tolist()

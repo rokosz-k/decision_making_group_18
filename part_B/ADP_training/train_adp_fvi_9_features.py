@@ -67,7 +67,7 @@ T_END        = 10     # hourly timesteps per day
 N            = 300    # sampled states per timestep (from samples CSV)
 K            = 20     # future scenarios per state (Monte Carlo expectation)
 I_ITER       = 20     # FVI iterations
-RIDGE_LAMBDA = 5.0   # same as train_adp_new_featsures.py for fair comparison
+RIDGE_LAMBDA = 3.0   # same as train_adp_new_featsures.py for fair comparison
 SEED         = 42
 
 # ── Feature definition — must match train_adp_new_features.py FEATURE_COLS ───

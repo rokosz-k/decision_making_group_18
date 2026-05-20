@@ -83,7 +83,7 @@ def _get_data():
 # ─────────────────────────────────────────────
 # Danger-zone constants  (must match train_adp_fvi_v4.py)
 # ─────────────────────────────────────────────
-T_DANGER_MARGIN   = 3.0    # feature fires when T_next < T_low + 3 = 21 °C
+T_DANGER_MARGIN   = 2.0    # feature fires when T_next < T_low + 2 = 20 °C
 H_APPROACH_THRESH = 60.0   # feature fires when H_next > 60 %
 
 # ─────────────────────────────────────────────

@@ -128,9 +128,8 @@ def run_script(select_action):
 
 if __name__ == "__main__":
     # from part_B.policies.SP_policy_18 import select_action
-    from part_B.policies.ADP_policy_9_features_18 import select_action
-    # from part_B.policies.ADP_policy_14_features_18 import select_action
-    # from part_B.policies.hybrid_policy_18 import select_action
+    # from part_B.policies.ADP_policy_9_features_18 import select_action
+    from part_B.policies.hybrid_policy_18 import select_action
     # from part_B.policies.hybrid_policy_18_v2 import select_action
 
     run_script(select_action)
